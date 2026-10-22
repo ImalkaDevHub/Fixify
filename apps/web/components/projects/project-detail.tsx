@@ -12,9 +12,20 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    projectApi.get(projectId).then(setProject).catch((reason: unknown) => {
-      setError(reason instanceof ApiError && reason.status === 404 ? "This project could not be found." : reason instanceof ApiError ? reason.message : "Unable to load this project.");
-    }).finally(() => setLoading(false));
+    let active = true;
+    setLoading(true);
+    setError(null);
+    projectApi.get(projectId).then((item) => {
+      if (active) setProject(item);
+    }).catch((reason: unknown) => {
+      if (!active) return;
+      // The API answers 422 for a malformed project ID, which is also "not found" to the user.
+      const notFound = reason instanceof ApiError && (reason.status === 404 || reason.status === 422);
+      setError(notFound ? "This project could not be found." : reason instanceof ApiError ? reason.message : "Unable to load this project.");
+    }).finally(() => {
+      if (active) setLoading(false);
+    });
+    return () => { active = false; };
   }, [projectId]);
 
   if (loading) return <main className="page-content"><div className="loading-state" role="status">Loading project…</div></main>;

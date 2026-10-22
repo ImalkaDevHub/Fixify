@@ -39,6 +39,12 @@ npm run dev
 
 If PowerShell blocks virtual-environment activation, use `.\.venv\Scripts\python.exe -m pip install -e ".[dev]"` and `.\.venv\Scripts\uvicorn.exe app.main:app --reload`.
 
+Windows notes:
+
+- Start the API with `--reload` as shown (or add `--loop asyncio:SelectorEventLoop`). Without either, uvicorn uses an event loop that psycopg's async mode cannot use and every database call fails.
+- Compose publishes PostgreSQL on `127.0.0.1:5432`. If a native PostgreSQL service already owns that port, stop it first; otherwise `DATABASE_URL` reaches the wrong server.
+- Interactive docs are at <http://localhost:8000/docs>, the dashboard at <http://localhost:3000>.
+
 ## macOS / Linux
 
 ```bash
@@ -61,5 +67,7 @@ Install PostgreSQL locally and create a database/user matching the environment v
 ## Checks and migrations
 
 Run backend checks from `services/api` in the virtual environment using `pytest` and `ruff check .`. Run frontend checks from `apps/web` with `npm run lint`, `npm run typecheck`, and `npm run build`.
+
+The migration test in `services/api/tests/test_migrations.py` runs only when `TEST_DATABASE_URL` points at a disposable PostgreSQL database whose name contains `test`; it applies migrations, checks for model drift, and downgrades back to empty.
 
 Create future schema migrations with `alembic revision --autogenerate -m "description"` and apply using `alembic upgrade head`. Review generated migrations before applying them.

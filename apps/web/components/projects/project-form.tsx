@@ -12,6 +12,7 @@ import { projectFormSchema, type ProjectCreateInput, type ProjectFormValues } fr
 export function ProjectForm() {
   const router = useRouter();
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [redirecting, setRedirecting] = useState(false);
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<ProjectFormValues, unknown, ProjectCreateInput>({
     resolver: zodResolver(projectFormSchema),
     defaultValues: { name: "", website_url: "", repo_full_name: "", default_branch: "" },
@@ -21,6 +22,7 @@ export function ProjectForm() {
     setSubmitError(null);
     try {
       const project = await projectApi.create(values);
+      setRedirecting(true);
       router.push(`/projects/${project.id}`);
       router.refresh();
     } catch (reason) {
@@ -57,7 +59,7 @@ export function ProjectForm() {
         </div>
         <div className="form-actions">
           <Link href="/projects" className="button button-secondary">Cancel</Link>
-          <button type="submit" className="button" disabled={isSubmitting}>{isSubmitting ? "Creating…" : "Create project"}</button>
+          <button type="submit" className="button" disabled={isSubmitting || redirecting}>{isSubmitting || redirecting ? "Creating…" : "Create project"}</button>
         </div>
       </form>
     </>

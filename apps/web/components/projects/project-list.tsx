@@ -5,9 +5,10 @@ import { ExternalLink, FolderPlus, Trash2 } from "lucide-react";
 import type { Project } from "@/lib/api";
 import { formatDate, getHostname } from "@/lib/utils";
 
-export function ProjectList({ projects, onDelete }: {
+export function ProjectList({ projects, onDelete, deletingId }: {
   projects: Project[];
   onDelete?: (project: Project) => void;
+  deletingId?: string | null;
 }) {
   if (projects.length === 0) {
     return (
@@ -43,7 +44,7 @@ export function ProjectList({ projects, onDelete }: {
                   <ExternalLink size={15} />
                 </a>
                 {onDelete && (
-                  <button className="table-action" onClick={() => onDelete(project)} aria-label={`Delete ${project.name}`}>
+                  <button className="table-action" onClick={() => onDelete(project)} disabled={deletingId === project.id} aria-label={`Delete ${project.name}`}>
                     <Trash2 size={15} />
                   </button>
                 )}

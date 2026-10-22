@@ -8,7 +8,11 @@ from sqlalchemy.ext.asyncio import (
 
 from app.core.config import settings
 
-engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+engine = create_async_engine(
+    settings.database_url,
+    pool_pre_ping=True,
+    connect_args={"connect_timeout": settings.database_connect_timeout_seconds},
+)
 SessionFactory = async_sessionmaker(engine, expire_on_commit=False)
 
 

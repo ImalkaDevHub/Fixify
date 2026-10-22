@@ -5,6 +5,14 @@ from datetime import datetime
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, field_validator
 
 _REPOSITORY_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+_CONTROL_CHARACTERS = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _reject_control_characters(value: str) -> str:
+    # PostgreSQL cannot store NUL; other control characters never belong in these fields.
+    if _CONTROL_CHARACTERS.search(value):
+        raise ValueError("Control characters are not allowed.")
+    return value
 
 
 class ProjectCreate(BaseModel):
@@ -16,7 +24,7 @@ class ProjectCreate(BaseModel):
     @field_validator("name")
     @classmethod
     def strip_project_name(cls, value: str) -> str:
-        value = value.strip()
+        value = _reject_control_characters(value.strip())
         if not value:
             raise ValueError("Project name cannot be empty.")
         return value
@@ -27,7 +35,8 @@ class ProjectCreate(BaseModel):
         if value is None or not value.strip():
             return None
         normalized = value.strip()
-        if not _REPOSITORY_PATTERN.fullmatch(normalized):
+        owner, _, repository = normalized.partition("/")
+        if not _REPOSITORY_PATTERN.fullmatch(normalized) or {owner, repository} & {".", ".."}:
             raise ValueError("Repository must use the owner/repository format.")
         return normalized
 
@@ -36,7 +45,7 @@ class ProjectCreate(BaseModel):
     def normalize_branch(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        normalized = value.strip()
+        normalized = _reject_control_characters(value.strip())
         return normalized or None
 
 

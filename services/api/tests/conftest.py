@@ -10,7 +10,7 @@ from app.main import app
 
 
 @pytest.fixture
-async def client():
+async def session_factory():
     engine = create_async_engine(
         "sqlite+aiosqlite://",
         connect_args={"check_same_thread": False},
@@ -18,8 +18,13 @@ async def client():
     )
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
-    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    yield factory
+    await engine.dispose()
 
+
+@pytest.fixture
+async def client(session_factory):
     async def override_session():
         async with session_factory() as session:
             yield session
@@ -28,4 +33,3 @@ async def client():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as test_client:
         yield test_client
     app.dependency_overrides.clear()
-    await engine.dispose()

@@ -179,6 +179,9 @@ REDIS_REQUIRED=false
 
 PostgreSQL is **always** required. Redis is reserved for future background work.
 
+> [!NOTE]
+> Website URL validation checks syntax and the HTTP/HTTPS scheme only. It does **not** make scanning arbitrary URLs safe; SSRF protection is a prerequisite for any scanner.
+
 </details>
 
 ## 🗃️ Database migrations
@@ -203,7 +206,12 @@ Check the current revision with `alembic current`.
 | 🐍 Backend | `services/api` *(activate the virtual environment first)* | `pytest` · `ruff check .` |
 | 🟦 Frontend | `apps/web` | `npm run lint` · `npm run typecheck` · `npm run build` |
 
-Backend tests use an isolated in-memory SQLite database and never touch your developer database.
+Backend tests use an isolated in-memory SQLite database and never touch your developer database. SQLite cannot prove PostgreSQL behavior, so the Alembic migration test in `tests/test_migrations.py` is skipped unless you point `TEST_DATABASE_URL` at a **disposable PostgreSQL database whose name contains `test`** (it applies the migrations, checks for model drift, then downgrades to empty):
+
+```powershell
+$env:TEST_DATABASE_URL = "postgresql+psycopg://USER:PASSWORD@localhost:5432/fixify_migration_test"
+pytest tests/test_migrations.py
+```
 
 ## 🩹 Troubleshooting
 
@@ -214,6 +222,9 @@ Backend tests use an isolated in-memory SQLite database and never touch your dev
 | **CORS error** | Make sure `API_CORS_ORIGINS` includes the frontend origin, then restart the API. |
 | **Frontend says API unavailable** | Start FastAPI and confirm `NEXT_PUBLIC_API_BASE_URL` in `apps/web/.env.local`. |
 | **Migration has no database** | Start PostgreSQL before running `alembic upgrade head`. |
+| **Port 5432 already in use / wrong credentials** | A native PostgreSQL service on the same machine already owns port 5432, so the Compose container cannot bind it and `DATABASE_URL` would reach the wrong server. Stop the native service, or use it deliberately by creating the `fixify` database and user there. |
+| **`Psycopg cannot use the 'ProactorEventLoop'` (Windows)** | Run the API with `--reload` (as documented) or add `--loop asyncio:SelectorEventLoop`. Plain `uvicorn app.main:app` on Windows uses an event loop psycopg cannot use. |
+| **Readiness takes ~5 s then returns 503** | PostgreSQL is unreachable; the connection attempt gives up after `DATABASE_CONNECT_TIMEOUT_SECONDS` (default 5). |
 
 ## 🗺️ Roadmap
 

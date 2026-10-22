@@ -21,3 +21,9 @@
 The current website URL validation checks syntax/protocol only. It is **not** safe to pass user URLs to a browser or network worker; implement SSRF defenses, DNS/IP checks, redirect controls, and network isolation before scanning. Browser automation and arbitrary execution should be isolated from the API process.
 
 There is no authentication or user ownership. Add authentication, authorization, ownership filtering, rate limits, and dependent-record deletion policy before public deployment. Test runs, findings, GitHub connections, and AI services are intentionally outside this foundation.
+
+Security requirements for later steps:
+
+- Every project query must be scoped to an authenticated owner; today any caller can read or delete any project.
+- Website pages and repository contents are untrusted input. Future AI analysis must treat them as data, never as instructions, and must not give model output direct access to credentials, the database, or the network.
+- The browser worker must run in a separate, network-restricted process or container, never inside the API process.

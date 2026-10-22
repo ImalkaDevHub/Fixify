@@ -14,9 +14,13 @@ export const projectFormSchema = z.object({
     .optional()
     .transform((value) => (value ? value : undefined))
     .refine((value) => !value || value.length <= 100, "Use 100 characters or fewer.")
-    .refine((value) => !value || /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value), {
-      message: "Use the owner/repository format.",
-    }),
+    .refine(
+      (value) =>
+        !value ||
+        (/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value) &&
+          !value.split("/").some((part) => part === "." || part === "..")),
+      { message: "Use the owner/repository format." },
+    ),
   default_branch: z.string().trim().max(255, "Use 255 characters or fewer.").optional(),
 });
 

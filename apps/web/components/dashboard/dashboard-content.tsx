@@ -13,16 +13,21 @@ export function DashboardContent() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let active = true;
     Promise.all([projectApi.list(5), projectApi.count()]).then(([items, count]) => {
+      if (!active) return;
       setProjects(items);
       setProjectCount(count);
     }).catch((reason: unknown) => {
-      setError(reason instanceof ApiError ? reason.message : "Unable to load projects right now.");
-    }).finally(() => setLoading(false));
+      if (active) setError(reason instanceof ApiError ? reason.message : "Unable to load projects right now.");
+    }).finally(() => {
+      if (active) setLoading(false);
+    });
+    return () => { active = false; };
   }, []);
 
   const metrics = [
-    { label: "Total projects", value: projectCount, note: "Websites in your workspace", icon: FolderKanban },
+    { label: "Total projects", value: loading || error ? "—" : projectCount, note: "Websites in your workspace", icon: FolderKanban },
     { label: "Test runs", value: "—", note: "Available in a future release", icon: ScanSearch },
     { label: "Bugs detected", value: "—", note: "Scanning is not available yet", icon: Bug },
     { label: "Fixes verified", value: "—", note: "Coming with review workflows", icon: CheckCircle2 },
