@@ -7,23 +7,26 @@ import type { ReactNode } from "react";
 
 const navigation = [
   { label: "Overview", href: "/", icon: LayoutDashboard, active: (path: string) => path === "/" || path === "/dashboard" },
-  { label: "Projects", href: "/projects", icon: FolderKanban, active: (path: string) => path.startsWith("/projects") },
+  { label: "Projects", href: "/projects", icon: FolderKanban, active: (path: string) => ["/projects", "/scans", "/findings"].some((prefix) => path.startsWith(prefix)) },
 ];
 const futureNavigation = [
-  { label: "Test runs", icon: ClipboardList },
-  { label: "Findings", icon: Bug },
+  { label: "All test runs", icon: ClipboardList },
+  { label: "All findings", icon: Bug },
   { label: "Settings", icon: Settings2 },
 ];
 
+function titleFor(pathname: string): string {
+  if (pathname.startsWith("/scans/")) return "Scan report";
+  if (pathname.startsWith("/findings/")) return "Finding";
+  if (pathname.startsWith("/projects/new")) return "New project";
+  if (pathname.startsWith("/projects/")) return "Project details";
+  if (pathname.startsWith("/projects")) return "Projects";
+  return "Overview";
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const pageTitle = pathname.startsWith("/projects/new")
-    ? "New project"
-    : pathname.startsWith("/projects/")
-      ? "Project details"
-      : pathname.startsWith("/projects")
-        ? "Projects"
-        : "Overview";
+  const pageTitle = titleFor(pathname);
 
   return (
     <div className="app-shell">
@@ -55,7 +58,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <span className="nav-link disabled" aria-disabled="true"><CircleHelp size={17} />Help center</span>
           <div className="sidebar-note">
             <strong>Just getting started?</strong>
-            Add your first website to set up your workspace. Scanning is coming in a future release.
+            Add a website, then run a scan from its project page. Only scan sites you are authorized to test.
           </div>
         </div>
       </aside>

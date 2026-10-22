@@ -1,0 +1,17 @@
+# Browser worker. The base image tag must match the pinned Playwright version below.
+FROM mcr.microsoft.com/playwright/python:v1.64.0-noble
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    ARTIFACT_DIR=/artifacts
+WORKDIR /app
+
+COPY pyproject.toml ./
+COPY app ./app
+RUN pip install --no-cache-dir --break-system-packages . "playwright==1.64.0" \
+    && mkdir -p /artifacts && chown pwuser /artifacts
+
+# Chromium runs as the image's unprivileged user, never as root.
+USER pwuser
+CMD ["python", "-m", "app.worker"]

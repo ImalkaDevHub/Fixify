@@ -30,6 +30,38 @@ services:
       timeout: 3s
       retries: 10
 
+  # Browser worker. Opt-in: docker compose --profile worker ... up -d --build
+  worker:
+    profiles: ["worker"]
+    build:
+      context: ../services/api
+      dockerfile: Dockerfile.worker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-fixify}:${POSTGRES_PASSWORD:-change-me-locally}@postgres:5432/${POSTGRES_DB:-fixify}
+      REDIS_URL: redis://redis:6379/0
+      QUEUE_BACKEND: redis
+      ARTIFACT_DIR: /artifacts
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-1}
+      SCANNER_MAX_LINKS: ${SCANNER_MAX_LINKS:-25}
+      SCANNER_MAX_SCAN_DURATION_SECONDS: ${SCANNER_MAX_SCAN_DURATION_SECONDS:-180}
+    # The API (running on the host) serves screenshots from the same directory.
+    volumes:
+      - ../services/api/.artifacts:/artifacts
+    # No published ports, no Docker socket, no host directories besides the artifact folder.
+    init: true
+    shm_size: "1gb"
+    mem_limit: 2g
+    cpus: 2
+    pids_limit: 512
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+
 volumes:
   postgres_data:
   redis_data:

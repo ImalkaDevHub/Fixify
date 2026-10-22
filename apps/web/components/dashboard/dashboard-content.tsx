@@ -3,21 +3,21 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ArrowRight, Bug, CheckCircle2, FolderKanban, Plus, ScanSearch } from "lucide-react";
-import { ApiError, projectApi, type Project } from "@/lib/api";
+import { ApiError, projectApi, scanApi, type DashboardSummary, type Project } from "@/lib/api";
 import { ProjectList } from "@/components/projects/project-list";
 
 export function DashboardContent() {
   const [projects, setProjects] = useState<Project[]>([]);
-  const [projectCount, setProjectCount] = useState(0);
+  const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
-    Promise.all([projectApi.list(5), projectApi.count()]).then(([items, count]) => {
+    Promise.all([projectApi.list(5), scanApi.summary()]).then(([items, totals]) => {
       if (!active) return;
       setProjects(items);
-      setProjectCount(count);
+      setSummary(totals);
     }).catch((reason: unknown) => {
       if (active) setError(reason instanceof ApiError ? reason.message : "Unable to load projects right now.");
     }).finally(() => {
@@ -26,10 +26,11 @@ export function DashboardContent() {
     return () => { active = false; };
   }, []);
 
+  const show = (value: number | undefined) => (loading || error || value === undefined ? "—" : value);
   const metrics = [
-    { label: "Total projects", value: loading || error ? "—" : projectCount, note: "Websites in your workspace", icon: FolderKanban },
-    { label: "Test runs", value: "—", note: "Available in a future release", icon: ScanSearch },
-    { label: "Bugs detected", value: "—", note: "Scanning is not available yet", icon: Bug },
+    { label: "Total projects", value: show(summary?.project_count), note: "Websites in your workspace", icon: FolderKanban },
+    { label: "Scans run", value: show(summary?.scan_count), note: summary?.active_scan_count ? `${summary.active_scan_count} queued or running` : "All scans, any outcome", icon: ScanSearch },
+    { label: "Open findings", value: show(summary?.latest_findings_count), note: "From each project's latest finished scan", icon: Bug },
     { label: "Fixes verified", value: "—", note: "Coming with review workflows", icon: CheckCircle2 },
   ];
 
@@ -45,11 +46,11 @@ export function DashboardContent() {
       <section className="welcome-card" aria-labelledby="welcome-title">
         <div className="welcome-copy">
           <h2 id="welcome-title">Set up your first website</h2>
-          <p>Add a website and optionally note its GitHub repository. Fixify will grow into a place to run browser checks, review findings, and verify fixes.</p>
+          <p>Add a website you are authorized to test, then run a scan. A headless browser records real console errors, failed requests, HTTP errors, broken links, and a screenshot.</p>
         </div>
         <div className="welcome-steps" aria-label="Getting started">
           <span className="welcome-step"><span className="step-number">1</span>Add project</span>
-          <span className="welcome-step"><span className="step-number">2</span>Scanning soon</span>
+          <span className="welcome-step"><span className="step-number">2</span>Run a scan</span>
         </div>
       </section>
 

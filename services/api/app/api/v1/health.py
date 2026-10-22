@@ -21,7 +21,8 @@ async def check_database(session: AsyncSession) -> bool:
 
 
 async def check_redis() -> bool:
-    if not settings.redis_required:
+    """Redis is required for the scan queue when QUEUE_BACKEND=redis, or if REDIS_REQUIRED."""
+    if not settings.redis_needed:
         return True
     client = Redis.from_url(settings.redis_url, socket_connect_timeout=2, socket_timeout=2)
     try:

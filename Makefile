@@ -1,7 +1,10 @@
-.PHONY: api web test lint typecheck
+.PHONY: api worker web test lint typecheck
 
 api:
 	cd services/api && uvicorn app.main:app --reload
+
+worker:
+	cd services/api && python -m app.worker
 
 web:
 	cd apps/web && npm run dev

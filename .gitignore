@@ -12,6 +12,7 @@ __pycache__/
 .ruff_cache/
 .coverage
 htmlcov/
+.artifacts/
 node_modules/
 .next/
 out/
