@@ -1,37 +1,96 @@
-# Fixify
+<div align="center">
 
-Fixify is a developer platform foundation for managing websites that will eventually be tested for bugs and offered human-reviewed fixes. This step delivers the application shell, persistent project management, and local infrastructure. It does **not** run scans, use AI, connect GitHub, or provide authentication.
+# 🔧 Fixify
 
-> This is a local-development foundation. Do not expose it publicly until authentication, authorization, project ownership, rate limiting, and URL/SSRF protections are implemented.
+### Test websites for bugs. Get human-reviewed fixes.
 
-## Current status
+A developer platform foundation for managing the websites you want tested, scanned, and fixed.
 
-- Next.js App Router dashboard and project-management UI
-- FastAPI `/api/v1` endpoints with async SQLAlchemy persistence
-- PostgreSQL schema managed by Alembic
-- PostgreSQL and Redis local containers
-- Project create/list/detail/delete API and backend tests
-- Readiness checks for PostgreSQL and Redis
-- Browser scanning, AI analysis, GitHub OAuth, and user accounts are not implemented
+<br />
 
-## Architecture
+![Status](https://img.shields.io/badge/status-foundation-blueviolet?style=for-the-badge)
+![Local only](https://img.shields.io/badge/use-local%20development-orange?style=for-the-badge)
 
-- `apps/web`: strict TypeScript Next.js frontend; typed API client and validated project form
-- `services/api`: FastAPI routers, Pydantic schemas, services, repositories, and SQLAlchemy models
-- `infra`: local PostgreSQL and Redis Docker Compose services
-- `docs`: architecture and local development instructions
+![Next.js](https://img.shields.io/badge/Next.js-App%20Router-000000?style=flat-square&logo=nextdotjs&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?style=flat-square&logo=typescript&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-async-009688?style=flat-square&logo=fastapi&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-Alembic-4169E1?style=flat-square&logo=postgresql&logoColor=white)
+![Redis](https://img.shields.io/badge/Redis-ready-DC382D?style=flat-square&logo=redis&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=flat-square&logo=docker&logoColor=white)
 
-See [docs/architecture.md](docs/architecture.md) and [docs/development-setup.md](docs/development-setup.md).
+[Quick start](#-quick-start) · [Architecture](#-architecture) · [Configuration](#-configuration) · [Troubleshooting](#-troubleshooting) · [Roadmap](#-roadmap)
 
-## Prerequisites
+</div>
 
-- Node.js 20.9+ and npm
-- Python 3.12+ (Python 3.14 is also supported by the selected libraries)
-- Docker Desktop or Docker Engine with Compose, or a native PostgreSQL installation
+---
 
-Check with `node --version`, `npm --version`, `python --version`, and `docker --version`.
+> [!WARNING]
+> **This is a local-development foundation.** Do not expose it publicly until authentication, authorization, project ownership, rate limiting, and URL/SSRF protections are implemented.
 
-## Quick start (Windows PowerShell)
+## ✨ What is Fixify?
+
+Fixify is built to become a platform where you add a website, have it tested for bugs, and receive **human-reviewed fixes**. This first step delivers the solid ground everything else will stand on: the application shell, persistent project management, and local infrastructure.
+
+## 📍 Current status
+
+| | Feature | Status |
+|---|---|---|
+| 🖥️ | Next.js App Router dashboard and project-management UI | ✅ Ready |
+| ⚡ | FastAPI `/api/v1` endpoints with async SQLAlchemy | ✅ Ready |
+| 🐘 | PostgreSQL schema managed by Alembic | ✅ Ready |
+| 🐳 | PostgreSQL and Redis local containers | ✅ Ready |
+| 📁 | Project create / list / detail / delete API + backend tests | ✅ Ready |
+| 🩺 | Readiness checks for PostgreSQL and Redis | ✅ Ready |
+| 🕷️ | Browser scanning | ⏳ Not yet |
+| 🤖 | AI analysis | ⏳ Not yet |
+| 🐙 | GitHub OAuth | ⏳ Not yet |
+| 👤 | User accounts and authentication | ⏳ Not yet |
+
+## 🏗️ Architecture
+
+```mermaid
+flowchart LR
+    U([👤 Developer]) --> W["🖥️ Next.js<br/>apps/web<br/>:3000"]
+    W -->|typed API client| A["⚡ FastAPI<br/>services/api<br/>:8000"]
+    A --> P[("🐘 PostgreSQL")]
+    A -.->|readiness · future jobs| R[("🔴 Redis")]
+```
+
+Inside the API, each request flows through clean, separated layers:
+
+```mermaid
+flowchart LR
+    Router["🛣️ Router"] --> Schema["📐 Pydantic schema"] --> Service["🧠 Service"] --> Repo["🗄️ Repository"] --> Model["📦 SQLAlchemy model"]
+```
+
+### Repository layout
+
+```text
+fixify/
+├── apps/
+│   └── web/           # Strict TypeScript Next.js frontend: typed API client, validated project form
+├── services/
+│   └── api/           # FastAPI routers, Pydantic schemas, services, repositories, SQLAlchemy models
+├── infra/             # Local PostgreSQL + Redis via Docker Compose
+└── docs/              # Architecture and local development instructions
+```
+
+📚 Read more in [docs/architecture.md](docs/architecture.md) and [docs/development-setup.md](docs/development-setup.md).
+
+## 🧰 Prerequisites
+
+| Tool | Version | Check with |
+|---|---|---|
+| Node.js + npm | 20.9+ | `node --version` · `npm --version` |
+| Python | 3.12+ (3.14 also supported by the selected libraries) | `python --version` |
+| Docker | Docker Desktop or Engine with Compose, *or* a native PostgreSQL install | `docker --version` |
+
+## 🚀 Quick start
+
+<details open>
+<summary><b>🪟 Windows (PowerShell)</b></summary>
+
+<br />
 
 From the repository root:
 
@@ -47,7 +106,7 @@ alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
-In a second terminal, from the repository root:
+In a **second terminal**, from the repository root:
 
 ```powershell
 cd apps/web
@@ -56,9 +115,12 @@ npm install
 npm run dev
 ```
 
-The dashboard is at <http://localhost:3000>. FastAPI interactive docs are at <http://localhost:8000/docs>; API health is <http://localhost:8000/api/v1/health>.
+</details>
 
-### macOS / Linux
+<details>
+<summary><b>🍎🐧 macOS / Linux</b></summary>
+
+<br />
 
 ```bash
 cp .env.example .env
@@ -71,7 +133,7 @@ alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
-In another terminal:
+In **another terminal**:
 
 ```bash
 cd apps/web
@@ -80,13 +142,46 @@ npm install
 npm run dev
 ```
 
-## Configuration
+</details>
 
-The root `.env.example` contains local placeholders. Copy it to `.env` and change the placeholder password before use. The frontend uses `apps/web/.env.local` copied from its `.env.example`; do not put secrets in `NEXT_PUBLIC_*` variables. Environment files are git-ignored.
+### 🎉 You're live
 
-If Docker is unavailable, install PostgreSQL locally, create a database and user matching `.env`, and run the API and web commands above. Redis can be installed locally or omitted from readiness checks by setting `REDIS_REQUIRED=false`; PostgreSQL is always required. Redis is reserved for future background work.
+| What | Where |
+|---|---|
+| 🖥️ Dashboard | <http://localhost:3000> |
+| 📖 Interactive API docs | <http://localhost:8000/docs> |
+| 💚 API health | <http://localhost:8000/api/v1/health> |
 
-## Database migrations
+## 🧭 Try it: manual project flow
+
+1. Open <http://localhost:3000> and select **New project**.
+2. Enter a project name and an HTTP(S) website URL. Repository and branch are optional.
+3. Submit, confirm the project appears in the list, and open its detail page.
+4. Refresh the page to confirm the project persisted in PostgreSQL.
+
+## ⚙️ Configuration
+
+- The root `.env.example` contains local placeholders. Copy it to `.env` and **change the placeholder password** before use.
+- The frontend uses `apps/web/.env.local`, copied from its own `.env.example`.
+- 🔐 **Never put secrets in `NEXT_PUBLIC_*` variables.**
+- Environment files are git-ignored.
+
+<details>
+<summary><b>No Docker? Use native PostgreSQL</b></summary>
+
+<br />
+
+Install PostgreSQL locally, create a database and user matching `.env`, then run the API and web commands above. Redis can be installed locally, or omitted from readiness checks by setting:
+
+```env
+REDIS_REQUIRED=false
+```
+
+PostgreSQL is **always** required. Redis is reserved for future background work.
+
+</details>
+
+## 🗃️ Database migrations
 
 After changing SQLAlchemy models, generate and inspect a migration:
 
@@ -96,38 +191,47 @@ alembic revision --autogenerate -m "describe the schema change"
 alembic upgrade head
 ```
 
-To inspect the current migration revision, use `alembic current`. Do not use `create_all()` for application schema management.
+Check the current revision with `alembic current`.
 
-## Checks
+> [!IMPORTANT]
+> Do not use `create_all()` for application schema management. Alembic owns the schema.
 
-```powershell
-# Backend (services/api; activate the virtual environment first)
-pytest
-ruff check .
+## ✅ Checks
 
-# Frontend (apps/web)
-npm run lint
-npm run typecheck
-npm run build
-```
+| Area | Directory | Commands |
+|---|---|---|
+| 🐍 Backend | `services/api` *(activate the virtual environment first)* | `pytest` · `ruff check .` |
+| 🟦 Frontend | `apps/web` | `npm run lint` · `npm run typecheck` · `npm run build` |
 
-Backend tests use an isolated in-memory SQLite database and do not alter a developer database.
+Backend tests use an isolated in-memory SQLite database and never touch your developer database.
 
-## Troubleshooting
+## 🩹 Troubleshooting
 
-- **Docker command not found:** install/start Docker Desktop, or use native PostgreSQL as described above.
-- **Database connection refused:** ensure PostgreSQL is healthy with `docker compose --env-file .env -f infra/docker-compose.yml ps`; verify `DATABASE_URL`.
-- **CORS error:** ensure `API_CORS_ORIGINS` includes the frontend origin and restart the API.
-- **Frontend says API unavailable:** start FastAPI and confirm `NEXT_PUBLIC_API_BASE_URL` in `apps/web/.env.local`.
-- **Migration has no database:** start PostgreSQL before `alembic upgrade head`.
+| Symptom | Fix |
+|---|---|
+| **Docker command not found** | Install/start Docker Desktop, or use native PostgreSQL as described above. |
+| **Database connection refused** | Check health with `docker compose --env-file .env -f infra/docker-compose.yml ps` and verify `DATABASE_URL`. |
+| **CORS error** | Make sure `API_CORS_ORIGINS` includes the frontend origin, then restart the API. |
+| **Frontend says API unavailable** | Start FastAPI and confirm `NEXT_PUBLIC_API_BASE_URL` in `apps/web/.env.local`. |
+| **Migration has no database** | Start PostgreSQL before running `alembic upgrade head`. |
 
-## Manual project flow
+## 🗺️ Roadmap
 
-1. Open <http://localhost:3000> and select **New project**.
-2. Enter a project name and an HTTP(S) website URL; repository and branch are optional.
-3. Submit, confirm the project appears in the list, and open its detail page.
-4. Refresh the page to confirm the project persisted in PostgreSQL.
+- [x] Application shell and project management (create / list / detail / delete)
+- [x] Async persistence with PostgreSQL + Alembic migrations
+- [x] Local infrastructure and readiness checks
+- [ ] 👤 User identity and project ownership *(required before any public exposure)*
+- [ ] 🛡️ URL / SSRF-safe validation and rate limiting
+- [ ] 🕷️ Browser scanning as an **isolated worker**, never inside the API process
+- [ ] 🧾 Scan and run persistence
+- [ ] 🐞 Findings
+- [ ] 📊 Evidence-based reporting
+- [ ] 🧑‍🔧 Human-reviewed fixes
 
-## Next stage
+<div align="center">
 
-Add user identity and ownership before any public exposure, then implement URL/SSRF-safe browser scanning as an isolated worker, scan/run persistence, findings, and evidence-based reporting. Keep arbitrary browser execution out of the API process.
+<br />
+
+**Built step by step, safely first. 🔧**
+
+</div>
