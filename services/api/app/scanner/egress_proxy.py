@@ -143,9 +143,7 @@ class EgressProxy:
         # same client connection to a host it has not validated.
         headers.append("Connection: close")
         upstream_writer.write(
-            (f"{method} {path} {version}\r\n" + "\r\n".join(headers) + "\r\n\r\n").encode(
-                "latin-1"
-            )
+            (f"{method} {path} {version}\r\n" + "\r\n".join(headers) + "\r\n\r\n").encode("latin-1")
         )
         await upstream_writer.drain()
         await self._pipe(reader, writer, upstream_reader, upstream_writer)

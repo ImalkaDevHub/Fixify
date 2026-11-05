@@ -59,7 +59,8 @@ async def test_prohibited_targets_are_blocked(url):
 
 
 @pytest.mark.parametrize(
-    "url", ["https://example.com/", "http://www.example.com:8080/path?q=1", "https://93.184.215.14/"]
+    "url",
+    ["https://example.com/", "http://www.example.com:8080/path?q=1", "https://93.184.215.14/"],
 )
 async def test_public_targets_are_allowed(url):
     destination = await fake_policy().check_url(url)

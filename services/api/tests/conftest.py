@@ -157,7 +157,10 @@ async def create_user(
 ) -> User:
     async with session_factory() as session:
         user = await auth_service.register(
-            session, email=email, password=password, display_name=email.split("@")[0],
+            session,
+            email=email,
+            password=password,
+            display_name=email.split("@")[0],
             config=settings,
         )
         if verified:

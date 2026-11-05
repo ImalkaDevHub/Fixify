@@ -84,3 +84,35 @@ These use real supervised processes and cover: start, duplicate detection, grace
 ## Manual checks against a real database
 
 These were verified manually in a real browser against the development database: register, verify email, sign in, create project, run scan, live status, report, screenshot, finding, notifications, analytics, mobile layout, sign out, and protected-route redirect. The AI, GitHub, fix, and pull-request steps were verified in the browser with the harness above (mock AI, fake GitHub). They still need one run with real Claude and GitHub credentials (see [status.md](status.md)).
+
+## GitHub Actions CI
+
+The CI workflow runs the frontend checks, backend and launcher suites, PostgreSQL migration validation, Chromium scanner tests, PostgreSQL + Redis browser workflow, Docker image builds, and security checks as independent jobs. The final **CI result** job is the required aggregate status. `main` and `development` pushes and pull requests trigger it; `workflow_dispatch` allows a manual run.
+
+The PostgreSQL migration job starts with an empty, disposable `fixify_migration_test` database, applies migrations, checks model drift, downgrades to base through the existing migration test, reapplies to head, and verifies that the database has exactly the single latest revision. The integration job uses disposable PostgreSQL and Redis service containers. It drives the existing E2E harness against its local fixture site through the API, Redis-backed worker, and web app. AI and GitHub are mocked as described above; this does not verify real external credentials.
+
+The scanner job installs Chromium and its Linux dependencies, then runs `tests/test_scanner_engine.py`; scanner targets are local fixtures only. Docker builds all three application images without pushing them, verifies non-root users and absence of `.env` files, and checks that Chromium is present in the worker image. Security checks include `npm audit`, `pip-audit`, `pip check`, Gitleaks over git history, `actionlint`, and zizmor.
+
+Equivalent local checks:
+
+```bash
+# Frontend
+cd apps/web
+npm ci
+npm run lint
+npm run typecheck
+npm test
+API_INTERNAL_URL=http://127.0.0.1:8000 npm run build
+npm audit --audit-level=high
+
+# Backend and browser scanner (from the repository root)
+python -m pip install -e "services/api[dev]"
+cd services/api
+ruff check .
+ruff format --check .
+pytest --ignore=tests/test_scanner_engine.py --ignore=tests/e2e -q
+python -m playwright install --with-deps chromium
+pytest tests/test_scanner_engine.py -q
+```
+
+The PostgreSQL migration test and browser E2E harness are opt-in locally; use only disposable databases whose names include `test` as documented above. CI creates isolated service containers and never connects to developer or production infrastructure. GitHub Actions has not been run remotely yet; inspect the **Actions** tab after the first push or pull request for actual hosted-runner results.

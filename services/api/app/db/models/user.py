@@ -21,9 +21,7 @@ TOKEN_PURPOSES = ("email_verification", "password_reset")
 class User(Base):
     __tablename__ = "users"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     # Stored normalized (trimmed, lower-case); unique.
     email: Mapped[str] = mapped_column(String(320), nullable=False, unique=True)
     display_name: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -50,17 +48,13 @@ class UserSession(Base):
     __tablename__ = "user_sessions"
     __table_args__ = (Index("ix_user_sessions_user", "user_id", "created_at"),)
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     refresh_token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     # The token this one replaced. Presenting it again means it was stolen: the session ends.
-    previous_token_hash: Mapped[str | None] = mapped_column(
-        String(64), nullable=True, index=True
-    )
+    previous_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     user_agent: Mapped[str | None] = mapped_column(String(255), nullable=True)
     ip_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -83,9 +77,7 @@ class UserToken(Base):
         Index("ix_user_tokens_user_purpose", "user_id", "purpose"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )

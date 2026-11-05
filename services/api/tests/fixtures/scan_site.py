@@ -123,9 +123,7 @@ class _Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         else:
-            status, content_type, body = self.routes.get(
-                path, (404, "text/plain", "not found")
-            )
+            status, content_type, body = self.routes.get(path, (404, "text/plain", "not found"))
         payload = body.encode()
         self.send_response(status)
         self.send_header("Content-Type", content_type)

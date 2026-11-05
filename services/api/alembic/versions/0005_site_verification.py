@@ -20,12 +20,8 @@ depends_on: str | Sequence[str] | None = None
 def upgrade() -> None:
     op.add_column("projects", sa.Column("verification_token", sa.String(length=64), nullable=True))
     op.add_column("projects", sa.Column("verified_host", sa.String(length=255), nullable=True))
-    op.add_column(
-        "projects", sa.Column("verified_at", sa.DateTime(timezone=True), nullable=True)
-    )
-    op.add_column(
-        "projects", sa.Column("verification_method", sa.String(length=16), nullable=True)
-    )
+    op.add_column("projects", sa.Column("verified_at", sa.DateTime(timezone=True), nullable=True))
+    op.add_column("projects", sa.Column("verification_method", sa.String(length=16), nullable=True))
 
 
 def downgrade() -> None:

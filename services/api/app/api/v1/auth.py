@@ -68,8 +68,13 @@ def set_auth_cookies(response: Response, issued: auth_service.IssuedSession) -> 
         samesite="lax",
     )
     response.set_cookie(
-        SESSION_HINT_COOKIE, "1", max_age=refresh_age, path="/", httponly=True,
-        secure=secure, samesite="lax",
+        SESSION_HINT_COOKIE,
+        "1",
+        max_age=refresh_age,
+        path="/",
+        httponly=True,
+        secure=secure,
+        samesite="lax",
     )
 
 

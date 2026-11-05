@@ -210,6 +210,18 @@ services\api\.venv\Scripts\python.exe -m unittest discover -s scripts/launcher/t
 
 See [docs/testing.md](docs/testing.md) for what each suite covers (including the PostgreSQL migration test and the browser end-to-end run), and [docs/deployment.md](docs/deployment.md) before deploying anywhere shared.
 
+## Continuous integration
+
+GitHub Actions runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml) on pushes and pull requests targeting `main` or `development`, and on manual dispatch. Jobs run in parallel and the final **CI result** job fails unless every required check succeeds.
+
+The workflow validates the frontend (ESLint, TypeScript, unit tests, production build), backend (Ruff lint and formatting, pytest, launcher tests), Alembic migrations on a fresh PostgreSQL database, and the scanner with Chromium against local fixtures. A separate PostgreSQL + Redis job runs the full browser workflow through the real worker and queue. Its AI provider and GitHub API are deliberately mocked; real Claude and GitHub credentials are neither required nor verified. Docker builds the API, worker, and web images for validation only; it does not publish or deploy them.
+
+Security checks include npm and Python dependency audits, GitHub Actions linting and static analysis, Gitleaks secret scanning, and a check for tracked non-example `.env` files. All Actions are pinned to commit SHAs. No repository secrets or extra variables are required; CI uses only disposable service credentials and the read-only default GitHub token.
+
+To inspect a run, open the repository's **Actions** tab, select the failed run and job, then expand the failing step. For local equivalents and the disposable database/browser setup, see [docs/testing.md](docs/testing.md). To make CI a merge requirement, enable branch protection for `main` and require the **CI result** status check. `development` is also configured as a trigger and can be protected if that branch is created.
+
+The workflow has been implemented locally but has not yet been verified by a remote GitHub Actions run. A local `npm audit` on 2026-11-05 found 8 existing advisories (1 high, 7 moderate); the high-severity Zod fix requires a major-version upgrade, so dependencies were not automatically changed. The CI audit will also report the Python dependency state.
+
 ## Docker images
 
 | Image | Dockerfile | Notes |

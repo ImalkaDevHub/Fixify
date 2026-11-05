@@ -284,9 +284,7 @@ async def revoke_other_sessions(session: AsyncSession, user: User, current: User
 # --- Single-use email tokens ---------------------------------------------------------------
 
 
-async def _create_token(
-    session: AsyncSession, user: User, purpose: str, ttl: timedelta
-) -> str:
+async def _create_token(session: AsyncSession, user: User, purpose: str, ttl: timedelta) -> str:
     now = utcnow()
     await user_repository.invalidate_tokens(session, user.id, purpose, now)
     raw = security.new_opaque_token()

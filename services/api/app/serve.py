@@ -25,8 +25,14 @@ def main() -> None:
     )
     if os.environ.get("API_RELOAD") == "1":
         # The reloader runs the app in a subprocess that already selects a compatible loop.
-        uvicorn.run("app.main:app", host=config.host, port=config.port, reload=True,
-                    proxy_headers=True, forwarded_allow_ips=config.forwarded_allow_ips)
+        uvicorn.run(
+            "app.main:app",
+            host=config.host,
+            port=config.port,
+            reload=True,
+            proxy_headers=True,
+            forwarded_allow_ips=config.forwarded_allow_ips,
+        )
         return
     loop_factory = asyncio.SelectorEventLoop if sys.platform == "win32" else None
     asyncio.run(uvicorn.Server(config).serve(), loop_factory=loop_factory)

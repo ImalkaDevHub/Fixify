@@ -77,9 +77,7 @@ async def create_scan(
     return ScanQueued.model_validate(run)
 
 
-@router.get(
-    "/projects/{project_id}/scans", response_model=list[RunSummary], responses=_NOT_FOUND
-)
+@router.get("/projects/{project_id}/scans", response_model=list[RunSummary], responses=_NOT_FOUND)
 async def list_scans(
     project_id: uuid.UUID,
     auth: Auth,
@@ -164,9 +162,7 @@ async def list_scan_findings(
 
 
 @router.get("/scans/{run_id}/comparison", response_model=RunComparison, responses=_NOT_FOUND)
-async def compare_scan(
-    run_id: uuid.UUID, auth: Auth, session: DatabaseSession
-) -> RunComparison:
+async def compare_scan(run_id: uuid.UUID, auth: Auth, session: DatabaseSession) -> RunComparison:
     """New and resolved findings compared with the project's previous finished scan."""
     comparison = await scan_service.compare_scan(session, auth.user.id, run_id)
     if comparison is None:
@@ -203,9 +199,7 @@ async def get_artifact(
 
 
 @router.get("/findings/{finding_id}", response_model=FindingDetail, responses=_NOT_FOUND)
-async def get_finding(
-    finding_id: uuid.UUID, auth: Auth, session: DatabaseSession
-) -> FindingDetail:
+async def get_finding(finding_id: uuid.UUID, auth: Auth, session: DatabaseSession) -> FindingDetail:
     """One finding with its sanitized evidence."""
     finding = await scan_service.get_finding(session, auth.user.id, finding_id)
     if finding is None:

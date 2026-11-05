@@ -87,9 +87,9 @@ class QueueSubmissionError(ScanError):
 
 def policy_config(settings: Settings) -> PolicyConfig:
     ports = {int(port) for port in settings.scanner_allowed_ports.split(",") if port.strip()}
-    hosts = {
-        host.strip().lower() for host in settings.scanner_unsafe_allowed_hosts.split(",")
-    } - {""}
+    hosts = {host.strip().lower() for host in settings.scanner_unsafe_allowed_hosts.split(",")} - {
+        ""
+    }
     return PolicyConfig(allowed_ports=frozenset(ports), unsafe_allowed_hosts=frozenset(hosts))
 
 
@@ -157,7 +157,10 @@ async def create_scan(
         raise ScanCapacityError("Too many scans are waiting. Try again in a few minutes.")
 
     run = await scan_repository.create_run(
-        session, project_id=project_id, target_url=target_url, max_links=max_links,
+        session,
+        project_id=project_id,
+        target_url=target_url,
+        max_links=max_links,
         trigger=trigger,
     )
     try:
@@ -379,9 +382,7 @@ async def latest_scans(
     }
 
 
-async def cancel_scan(
-    session: AsyncSession, owner_id: uuid.UUID, run_id: uuid.UUID
-) -> RunSummary:
+async def cancel_scan(session: AsyncSession, owner_id: uuid.UUID, run_id: uuid.UUID) -> RunSummary:
     if await scan_repository.get_owned_run(session, run_id, owner_id) is None:
         raise RunNotFoundError("Scan not found.")
     cancelled = await scan_repository.transition(

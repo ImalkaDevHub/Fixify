@@ -70,9 +70,9 @@ async def delete_project(session: AsyncSession, project: Project) -> None:
 
 async def run_ids_for_owner(session: AsyncSession, owner_id: uuid.UUID) -> list[uuid.UUID]:
     result = await session.scalars(
-        select(TestRun.id).join(Project, Project.id == TestRun.project_id).where(
-            Project.owner_id == owner_id
-        )
+        select(TestRun.id)
+        .join(Project, Project.id == TestRun.project_id)
+        .where(Project.owner_id == owner_id)
     )
     return list(result)
 

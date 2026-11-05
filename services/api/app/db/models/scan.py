@@ -23,9 +23,7 @@ from app.db.base import Base
 JsonDocument = JSON().with_variant(JSONB(), "postgresql")
 
 RUN_STATUSES = ("queued", "running", "completed", "completed_with_errors", "failed", "cancelled")
-TERMINAL_RUN_STATUSES = frozenset(
-    {"completed", "completed_with_errors", "failed", "cancelled"}
-)
+TERMINAL_RUN_STATUSES = frozenset({"completed", "completed_with_errors", "failed", "cancelled"})
 CHECK_STATUSES = ("passed", "failed", "skipped", "error")
 SEVERITIES = ("critical", "high", "medium", "low", "info")
 CONFIDENCES = ("confirmed", "suspected")
@@ -45,9 +43,7 @@ class TestRun(Base):
         Index("ix_test_runs_status_created", "status", "created_at"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     project_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
@@ -76,9 +72,7 @@ class TestRun(Base):
 
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    heartbeat_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Python-side default gives microsecond ordering on every database (runs are ordered by it).
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -98,9 +92,7 @@ class ScanArtifact(Base):
     __tablename__ = "scan_artifacts"
     __table_args__ = (Index("ix_scan_artifacts_run", "test_run_id"),)
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     test_run_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("test_runs.id", ondelete="CASCADE"), nullable=False
     )
@@ -128,9 +120,7 @@ class TestCaseResult(Base):
         UniqueConstraint("test_run_id", "check_type", name="uq_test_case_results_run_check"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     test_run_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("test_runs.id", ondelete="CASCADE"), nullable=False
     )
@@ -159,9 +149,7 @@ class Finding(Base):
         Index("ix_findings_project_fingerprint", "project_id", "fingerprint"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     test_run_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("test_runs.id", ondelete="CASCADE"), nullable=False
     )

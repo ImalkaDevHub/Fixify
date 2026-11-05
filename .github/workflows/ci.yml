@@ -1,0 +1,479 @@
+name: CI
+
+on:
+  push:
+    branches: [main, development]
+  pull_request:
+    branches: [main, development]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: apps/web
+        run: npm ci --no-audit --no-fund
+
+      - name: Run ESLint
+        working-directory: apps/web
+        run: npm run lint
+
+      - name: Check TypeScript types
+        working-directory: apps/web
+        run: npm run typecheck
+
+      - name: Run frontend tests
+        working-directory: apps/web
+        run: npm test
+
+      - name: Build production app
+        working-directory: apps/web
+        env:
+          API_INTERNAL_URL: http://127.0.0.1:8000
+          NEXT_TELEMETRY_DISABLED: "1"
+        run: npm run build
+
+  backend:
+    name: Backend validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: services/api
+    env:
+      FIXIFY_IGNORE_ENV_FILE: "1"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: services/api/pyproject.toml
+
+      - name: Install API and development dependencies
+        run: python -m pip install -e ".[dev]"
+
+      - name: Run Ruff lint
+        run: ruff check .
+
+      - name: Check Ruff formatting
+        run: ruff format --check .
+
+      - name: Run backend tests
+        run: pytest --ignore=tests/test_scanner_engine.py --ignore=tests/e2e -q
+
+      - name: Run launcher tests
+        working-directory: .
+        run: python -m unittest discover -s scripts/launcher/tests -v
+
+  migrations:
+    name: PostgreSQL migration validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      APP_ENV: development
+      FIXIFY_IGNORE_ENV_FILE: "1"
+      DATABASE_URL: postgresql+psycopg://fixify_ci:ci-only-password@127.0.0.1:5432/fixify_migration_test
+      TEST_DATABASE_URL: postgresql+psycopg://fixify_ci:ci-only-password@127.0.0.1:5432/fixify_migration_test
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: fixify_migration_test
+          POSTGRES_USER: fixify_ci
+          POSTGRES_PASSWORD: ci-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U fixify_ci -d fixify_migration_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    defaults:
+      run:
+        working-directory: services/api
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: services/api/pyproject.toml
+
+      - name: Install API and development dependencies
+        run: python -m pip install -e ".[dev]"
+
+      - name: Apply migrations and check model drift
+        run: pytest tests/test_migrations.py -q
+
+      - name: Verify the empty database reaches the single latest revision
+        run: |
+          python -m alembic upgrade head
+          python - <<'PY'
+          import os
+
+          from alembic.config import Config
+          from alembic.script import ScriptDirectory
+          from sqlalchemy import create_engine, text
+
+          head = ScriptDirectory.from_config(Config("alembic.ini")).get_current_head()
+          engine = create_engine(os.environ["DATABASE_URL"])
+          with engine.connect() as connection:
+              revisions = connection.execute(
+                  text("SELECT version_num FROM alembic_version")
+              ).scalars().all()
+          engine.dispose()
+          assert revisions == [head], f"Expected only head revision {head}, got {revisions}"
+          print(f"Database is at Alembic head {head}")
+          PY
+
+  playwright-scanner:
+    name: Playwright scanner tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: services/api
+    env:
+      FIXIFY_IGNORE_ENV_FILE: "1"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: services/api/pyproject.toml
+
+      - name: Install API and development dependencies
+        run: python -m pip install -e ".[dev]"
+
+      - name: Install Chromium and system dependencies
+        run: python -m playwright install --with-deps chromium
+
+      - name: Run browser scanner tests against local fixtures
+        run: pytest tests/test_scanner_engine.py -q
+
+  postgres-redis-e2e:
+    name: PostgreSQL, Redis, worker, and browser workflow
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: fixify_e2e_test
+          POSTGRES_USER: fixify_ci
+          POSTGRES_PASSWORD: ci-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U fixify_ci -d fixify_e2e_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      FIXIFY_IGNORE_ENV_FILE: "1"
+      API_INTERNAL_URL: http://127.0.0.1:8000
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: services/api/pyproject.toml
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install API and development dependencies
+        working-directory: services/api
+        run: python -m pip install -e ".[dev]"
+
+      - name: Install web dependencies
+        working-directory: apps/web
+        run: npm ci --no-audit --no-fund
+
+      - name: Install Chromium and system dependencies
+        working-directory: services/api
+        run: python -m playwright install --with-deps chromium
+
+      - name: Start the API, Redis-backed worker, and local web app
+        working-directory: services/api
+        env:
+          DATABASE_URL: postgresql+psycopg://fixify_ci:ci-only-password@127.0.0.1:5432/fixify_e2e_test
+          REDIS_URL: redis://127.0.0.1:6379/15
+          E2E_DATA_DIR: ${{ runner.temp }}/fixify-e2e
+        run: |
+          mkdir -p "$E2E_DATA_DIR"
+          python -m tests.e2e.stack \
+            --data "$E2E_DATA_DIR" \
+            --database-url "$DATABASE_URL" \
+            --redis-url "$REDIS_URL" \
+            > "$RUNNER_TEMP/fixify-e2e-api.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/fixify-e2e-api.pid"
+
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:8000/api/v1/health/ready >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl --fail --silent http://127.0.0.1:8000/api/v1/health/ready >/dev/null
+
+      - name: Start the web app
+        working-directory: apps/web
+        run: |
+          npm run dev -- --hostname 127.0.0.1 > "$RUNNER_TEMP/fixify-e2e-web.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/fixify-e2e-web.pid"
+
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:3000/register >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl --fail --silent http://127.0.0.1:3000/register >/dev/null
+
+      - name: Run full browser workflow with mock AI and fake GitHub
+        working-directory: services/api
+        env:
+          E2E_DATA_DIR: ${{ runner.temp }}/fixify-e2e
+        run: pytest tests/e2e/test_workflow.py -q
+
+      - name: Show application logs on failure
+        if: failure()
+        run: |
+          for log in "$RUNNER_TEMP/fixify-e2e-api.log" "$RUNNER_TEMP/fixify-e2e-web.log"; do
+            if [[ -f "$log" ]]; then
+              echo "Last 100 lines of $log"
+              tail -n 100 "$log"
+            fi
+          done
+
+  docker:
+    name: Docker image validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Build API image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: services/api
+          file: services/api/Dockerfile
+          tags: fixify-api:ci
+          load: true
+          push: false
+          cache-from: type=gha,scope=fixify-api
+          cache-to: type=gha,scope=fixify-api,mode=max
+
+      - name: Build worker image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: services/api
+          file: services/api/Dockerfile.worker
+          tags: fixify-worker:ci
+          load: true
+          push: false
+          cache-from: type=gha,scope=fixify-worker
+          cache-to: type=gha,scope=fixify-worker,mode=max
+
+      - name: Build web image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: apps/web
+          file: apps/web/Dockerfile
+          tags: fixify-web:ci
+          load: true
+          push: false
+          cache-from: type=gha,scope=fixify-web
+          cache-to: type=gha,scope=fixify-web,mode=max
+
+      - name: Verify unprivileged users and clean image contents
+        run: |
+          for image in fixify-api:ci fixify-worker:ci fixify-web:ci; do
+            user="$(docker image inspect "$image" --format '{{.Config.User}}')"
+            test -n "$user"
+            echo "$image runs as $user"
+          done
+
+          docker run --rm --entrypoint sh fixify-api:ci \
+            -c 'test ! -e /app/.env && test ! -e /app/.env.example'
+          docker run --rm --entrypoint sh fixify-worker:ci \
+            -c 'test ! -e /app/.env && test ! -e /app/.env.example'
+          docker run --rm --entrypoint sh fixify-web:ci \
+            -c 'test ! -e /app/.env && test ! -e /app/.env.example'
+
+      - name: Verify Chromium is present in the worker image
+        run: |
+          docker run --rm --entrypoint python fixify-worker:ci -c \
+            'from pathlib import Path; from playwright.sync_api import sync_playwright; p = sync_playwright().start(); executable = Path(p.chromium.executable_path); assert executable.is_file(), executable; p.stop()'
+
+  security:
+    name: Dependency, secret, and workflow security checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out full history
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Audit frontend dependencies
+        working-directory: apps/web
+        run: |
+          npm ci --no-fund
+          npm audit --audit-level=high
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: services/api/pyproject.toml
+
+      - name: Check backend dependency consistency and vulnerabilities
+        working-directory: services/api
+        run: |
+          python -m pip install -e ".[dev]"
+          python -m pip install pip-audit
+          python -m pip check
+          pip-audit
+
+      - name: Check for committed environment files
+        run: |
+          python - <<'PY'
+          import subprocess
+          from pathlib import PurePosixPath
+
+          tracked = subprocess.check_output(["git", "ls-files", "-z"]).decode().split("\0")
+          forbidden = {
+              ".env",
+              ".env.development",
+              ".env.development.local",
+              ".env.local",
+              ".env.production",
+              ".env.production.local",
+              ".env.test",
+              ".env.test.local",
+          }
+          found = [path for path in tracked if path and PurePosixPath(path).name in forbidden]
+          if found:
+              raise SystemExit(f"Refusing to track environment files: {', '.join(found)}")
+          print("No non-example environment files are tracked")
+          PY
+
+      - name: Install actionlint and Gitleaks
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+          go install github.com/gitleaks/gitleaks/v8@v8.30.1
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Lint GitHub Actions workflows
+        run: actionlint .github/workflows/ci.yml
+
+      - name: Scan repository history for secrets
+        run: gitleaks git --redact --exit-code 1 --no-banner
+
+      - name: Audit GitHub Actions security
+        uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # zizmor-action v0.8.1
+        with:
+          inputs: .github/workflows/ci.yml
+          version: v1.32.0
+          online-audits: false
+          advanced-security: false
+          annotations: true
+
+  ci-result:
+    name: CI result
+    if: always()
+    needs:
+      - frontend
+      - backend
+      - migrations
+      - playwright-scanner
+      - postgres-redis-e2e
+      - docker
+      - security
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require every validation job to pass
+        env:
+          FRONTEND_RESULT: ${{ needs.frontend.result }}
+          BACKEND_RESULT: ${{ needs.backend.result }}
+          MIGRATIONS_RESULT: ${{ needs.migrations.result }}
+          SCANNER_RESULT: ${{ needs['playwright-scanner'].result }}
+          INTEGRATION_RESULT: ${{ needs['postgres-redis-e2e'].result }}
+          DOCKER_RESULT: ${{ needs.docker.result }}
+          SECURITY_RESULT: ${{ needs.security.result }}
+        run: |
+          printf 'Frontend: %s\nBackend: %s\nMigrations: %s\nScanner: %s\nIntegration: %s\nDocker: %s\nSecurity: %s\n' \
+            "$FRONTEND_RESULT" "$BACKEND_RESULT" "$MIGRATIONS_RESULT" \
+            "$SCANNER_RESULT" "$INTEGRATION_RESULT" "$DOCKER_RESULT" "$SECURITY_RESULT"
+          for result in "$FRONTEND_RESULT" "$BACKEND_RESULT" "$MIGRATIONS_RESULT" \
+            "$SCANNER_RESULT" "$INTEGRATION_RESULT" "$DOCKER_RESULT" "$SECURITY_RESULT"; do
+            if [[ "$result" != "success" ]]; then
+              echo "At least one required CI job did not pass."
+              exit 1
+            fi
+          done
+          echo "All CI jobs passed."

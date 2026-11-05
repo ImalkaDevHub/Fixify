@@ -180,10 +180,14 @@ def test_failed_and_blocked_sub_resources(site, tmp_path):
 @requires_chromium
 def test_broken_links(site, tmp_path):
     result = _scan(site, "/broken-links", tmp_path)
-    confirmed = {f.affected_url.rsplit("/", 1)[-1] for f in result.findings
-                 if f.finding_type == "broken_link"}
-    suspected = {f.affected_url for f in result.findings
-                 if f.finding_type == "possibly_broken_link"}
+    confirmed = {
+        f.affected_url.rsplit("/", 1)[-1]
+        for f in result.findings
+        if f.finding_type == "broken_link"
+    }
+    suspected = {
+        f.affected_url for f in result.findings if f.finding_type == "possibly_broken_link"
+    }
     assert confirmed == {"gone", "redirect-to-gone"}
     assert any(url.endswith("/flaky") for url in suspected)
     details = next(c for c in result.checks if c.check_type == "broken_links").details

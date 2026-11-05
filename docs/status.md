@@ -4,6 +4,14 @@
 
 Audit and verification: 2026-11-05.
 
+## Continuous integration
+
+The GitHub Actions CI workflow is implemented in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml). It runs frontend and backend checks, fresh-PostgreSQL Alembic validation, local-fixture Chromium scanner tests, a PostgreSQL + Redis browser workflow with the real worker, validation-only Docker builds, and dependency/secret/workflow security checks. It is CI only: it does not deploy or publish images. AI and GitHub remain mocked in automated E2E tests; the workflow needs no application credentials.
+
+**Remote status: not yet verified.** A successful local test or image build does not establish that the GitHub-hosted workflow has passed. Run it from the repository's Actions tab after pushing this workflow.
+
+**Known dependency findings:** local `npm audit` on 2026-11-05 reports 8 advisories (1 high, 7 moderate), including a high-severity Zod advisory whose suggested fix requires a major-version upgrade. No dependency upgrades were made as part of CI setup. The first CI run will also execute `pip-audit` and report the current Python dependency state.
+
 ## Architecture
 
 | Layer | Intended | Actual | Status |
@@ -68,21 +76,24 @@ All run on 2026-11-05 on Windows 11 (Python 3.14.7, Node.js 24.20.0, Docker 29.8
 | Model drift | `alembic check` | no new operations |
 | Migration round trip | `TEST_DATABASE_URL=… pytest tests/test_migrations.py` | **passed** (upgrade, drift check, downgrade to empty) on `fixify_migration_test` |
 | Browser E2E, PostgreSQL + Redis | `tests.e2e.stack --database-url …/fixify_e2e_test --redis-url …` + `pytest tests/e2e/test_workflow.py` | **passed** (29 s): register → verify → project → scan of the local fixture site through the Redis queue → 5 findings + screenshot stored in PostgreSQL → AI analysis (mock) → GitHub connect (fake) → fix → review → approve → pull request |
+| Isolated CI-style migration rerun | temporary PostgreSQL 17 container with a clean `fixify_migration_test` database | **passed**: migration round-trip test, re-upgrade, model drift check, and single-head revision `0005_site_verification` |
+| CI-style browser workflow rerun | temporary PostgreSQL + Redis containers and local E2E harness | **blocked by local port conflict**: an already-running Next.js dev server on port 3000 prevented starting the isolated web app; the pre-existing server was left untouched |
 | Browser E2E, SQLite + Redis | same, without `--database-url` | passed (30 s) |
 | CSP in a browser | production build, `/login` | all 19 scripts carry the nonce, no console violations, React hydrated (client-side validation works) |
 | Launcher start on the real stack | `.\fixify.ps1 start` | API ready (`/health/ready`: database and Redis), worker started; web step refused because a manually started `next dev` held port 3000, and the run rolled back cleanly. **A complete start including the web app is not verified on this machine** |
 | Worker shutdown (Windows) | `.\fixify.ps1 stop` | `Received SIGBREAK; shutting down` → `Worker stopped`, exit code 0 (was killed with `0xC000013A` before the fix) |
 | API image | `docker build services/api` | **built** (589 MB) and run on the Compose network: Docker health check `healthy`, `/health/ready` ready (PostgreSQL + Redis), runs as `fixify` (non-root), no `.env` in the image, `alembic upgrade head` works with `--read-only` (the `migrate` service) |
-| Web image | `docker build apps/web` | **not built**: `npm ci` fails inside the build (see below) |
-| Worker image | `docker build -f Dockerfile.worker` | **not attempted**: about 2 GB Playwright base image over this network |
+| Web image | `docker buildx build --load --file apps/web/Dockerfile apps/web` | **not built**: `npm ci` failed in Docker with `npm error Exit handler never called` |
+| Worker image | `docker buildx build --load --file services/api/Dockerfile.worker services/api` | **not built**: Docker Desktop could not resolve `mcr.microsoft.com` (no configured HTTPS proxy / DNS failure) |
+| GitHub Actions CI | `.github/workflows/ci.yml` | **implemented, not remotely verified**; first hosted run still needs to validate workflow execution, security findings, and all three image builds |
 
-**Why the web image did not build here.** This network's firewall (Fortinet) re-signs TLS for `registry.npmjs.org`. Inside containers that certificate is untrusted, so `npm ci` fails (`unable to verify the first certificate`, reproduced twice; `npm view` in a plain `node:22-alpine` container fails the same way). PyPI is not intercepted, which is why the API image built. TLS verification was not disabled. Image downloads from Docker Hub were very slow, and stalled several times.
+**Container build environment.** The current Docker web build failed during `npm ci` with `Exit handler never called`; previous attempts on this network showed an untrusted TLS-inspection certificate for `registry.npmjs.org`. The worker image build could not resolve `mcr.microsoft.com` because Docker Desktop has no configured HTTPS proxy / DNS access. TLS verification was not disabled. These images still need a runner/network with registry access.
 
 ## Remaining work
 
 1. **Real-credential runs:** Claude (`ANTHROPIC_API_KEY`) and a GitHub OAuth app. These flows are verified only with the mock provider and the fake GitHub API.
 2. **Production blockers** (details in [security.md](security.md#known-gaps)): network-isolated scanner without database credentials; DNS TXT site verification; 2FA (recommended); a GitHub App instead of the OAuth `repo` scope (recommended).
-3. **Web and worker images** still need to be built and run on a network without TLS inspection. A CI runner will do this in the next phase.
+3. **Web and worker images** still need successful builds on a network without TLS inspection; the new CI job attempts these builds, but its results are not known until it runs on GitHub Actions.
 4. **One complete `.\fixify.ps1 start` including the web app** on this machine: run it once while no manual `next dev` holds port 3000. The web step itself is covered by the launcher tests, and earlier runs started the API and worker.
 5. **Production email (SMTP)** is configured but untested; development uses the console backend.
 

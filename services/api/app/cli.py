@@ -1,8 +1,8 @@
 """Administrative commands.
 
-    python -m app.cli assign-orphans --email you@example.com
-        Give every project that has no owner (created before authentication existed) to the
-        account with that email address. Nothing is deleted.
+python -m app.cli assign-orphans --email you@example.com
+    Give every project that has no owner (created before authentication existed) to the
+    account with that email address. Nothing is deleted.
 """
 
 import argparse

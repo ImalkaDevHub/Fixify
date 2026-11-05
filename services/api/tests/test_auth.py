@@ -71,9 +71,7 @@ async def test_duplicate_registration_is_rejected(anon_client):
     assert response.status_code == 409
 
 
-@pytest.mark.parametrize(
-    "password", ["short", "          " * 2, "password123", "x" * 129]
-)
+@pytest.mark.parametrize("password", ["short", "          " * 2, "password123", "x" * 129])
 async def test_weak_passwords_are_rejected(anon_client, password):
     response = await anon_client.post(
         "/api/v1/auth/register", json={**REGISTER, "password": password}
@@ -84,8 +82,11 @@ async def test_weak_passwords_are_rejected(anon_client, password):
 async def test_password_cannot_equal_the_email(anon_client):
     response = await anon_client.post(
         "/api/v1/auth/register",
-        json={"email": "longname123@example.com", "password": "longname123@example.com",
-              "display_name": "X"},
+        json={
+            "email": "longname123@example.com",
+            "password": "longname123@example.com",
+            "display_name": "X",
+        },
     )
     assert response.status_code == 400
 
@@ -339,8 +340,14 @@ async def test_delete_account_removes_owned_data(client, other_client, session_f
     async with session_factory() as session:
         assert await session.get(Project, uuid.UUID(mine.json()["id"])) is None
         assert await session.scalar(select(func.count()).select_from(Project)) == 1
-        assert await session.scalar(select(func.count()).select_from(UserSession).where(
-            UserSession.user_id == client.user_id)) == 0
+        assert (
+            await session.scalar(
+                select(func.count())
+                .select_from(UserSession)
+                .where(UserSession.user_id == client.user_id)
+            )
+            == 0
+        )
     assert (await client.get("/api/v1/auth/me")).status_code == 401
 
 

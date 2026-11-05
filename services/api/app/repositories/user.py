@@ -25,9 +25,7 @@ async def get_session(session: AsyncSession, session_id: uuid.UUID) -> UserSessi
     return await session.get(UserSession, session_id)
 
 
-async def get_session_by_refresh_hash(
-    session: AsyncSession, token_hash: str
-) -> UserSession | None:
+async def get_session_by_refresh_hash(session: AsyncSession, token_hash: str) -> UserSession | None:
     return await session.scalar(
         select(UserSession).where(UserSession.refresh_token_hash == token_hash).with_for_update()
     )

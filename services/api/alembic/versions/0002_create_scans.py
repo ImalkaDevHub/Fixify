@@ -4,6 +4,7 @@ Revision ID: 0002_scans
 Revises: 0001_projects
 Create Date: 2026-10-22
 """
+
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -144,9 +145,7 @@ def upgrade() -> None:
     )
     op.create_index("ix_findings_run_severity", "findings", ["test_run_id", "severity"])
     op.create_index("ix_findings_project_created", "findings", ["project_id", "created_at"])
-    op.create_index(
-        "ix_findings_project_fingerprint", "findings", ["project_id", "fingerprint"]
-    )
+    op.create_index("ix_findings_project_fingerprint", "findings", ["project_id", "fingerprint"])
 
 
 def downgrade() -> None:

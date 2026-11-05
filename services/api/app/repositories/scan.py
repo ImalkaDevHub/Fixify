@@ -50,8 +50,10 @@ async def list_runs(
 
 
 def _owned_runs(owner_id: uuid.UUID) -> Select[tuple[TestRun]]:
-    return select(TestRun).join(Project, Project.id == TestRun.project_id).where(
-        Project.owner_id == owner_id
+    return (
+        select(TestRun)
+        .join(Project, Project.id == TestRun.project_id)
+        .where(Project.owner_id == owner_id)
     )
 
 
@@ -60,9 +62,7 @@ async def get_owned_run(
 ) -> TestRun | None:
     """The run, only if its project belongs to owner_id."""
     return await session.scalar(
-        _owned_runs(owner_id).where(TestRun.id == run_id).execution_options(
-            populate_existing=True
-        )
+        _owned_runs(owner_id).where(TestRun.id == run_id).execution_options(populate_existing=True)
     )
 
 

@@ -436,7 +436,7 @@ def check_page_basics(
             check_type=check_type,
             finding_type="missing_viewport_meta",
             title="No responsive viewport meta tag",
-            description="Without <meta name=\"viewport\">, mobile browsers render the page at "
+            description='Without <meta name="viewport">, mobile browsers render the page at '
             "desktop width.",
             severity="low",
             affected_url=page_url,

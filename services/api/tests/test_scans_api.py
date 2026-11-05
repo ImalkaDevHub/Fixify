@@ -98,7 +98,10 @@ async def test_scan_listing_and_pagination(client, session_factory, artifact_dir
         run_id = (await _scan(client, project_id)).json()["id"]
         ids.append(run_id)
         await complete_run(
-            session_factory, uuid.UUID(run_id), scan_result([]), tmp_path / str(index),
+            session_factory,
+            uuid.UUID(run_id),
+            scan_result([]),
+            tmp_path / str(index),
             artifact_dir,
         )
     page = (await client.get(f"/api/v1/projects/{project_id}/scans?limit=2&offset=0")).json()
@@ -124,8 +127,7 @@ async def test_completed_scan_details_findings_and_filtering(
     assert detail["status"] == "completed"
     assert detail["checks_total"] == 2 and detail["checks_passed"] == 1
     assert detail["findings_count"] == 3
-    assert detail["severity_counts"] == {"critical": 0, "high": 1, "medium": 0, "low": 2,
-                                         "info": 0}
+    assert detail["severity_counts"] == {"critical": 0, "high": 1, "medium": 0, "low": 2, "info": 0}
     assert len(detail["artifacts"]) == 1
 
     findings = (await client.get(f"/api/v1/scans/{run_id}/findings")).json()
@@ -144,8 +146,12 @@ async def test_completed_scan_details_findings_and_filtering(
     assert projects[0]["latest_scan"]["status"] == "completed"
     assert projects[0]["latest_scan"]["findings_count"] == 3
     summary = (await client.get("/api/v1/scans/summary")).json()
-    assert summary == {"project_count": 1, "scan_count": 1, "active_scan_count": 0,
-                       "latest_findings_count": 3}
+    assert summary == {
+        "project_count": 1,
+        "scan_count": 1,
+        "active_scan_count": 0,
+        "latest_findings_count": 3,
+    }
 
 
 async def test_missing_run_and_finding(client):
@@ -162,8 +168,9 @@ async def test_artifact_access_is_restricted_to_its_scan(
 ):
     project_id = await _project(client)
     run_a = (await _scan(client, project_id)).json()["id"]
-    await complete_run(session_factory, uuid.UUID(run_a), scan_result([]), tmp_path / "a",
-                       artifact_dir)
+    await complete_run(
+        session_factory, uuid.UUID(run_a), scan_result([]), tmp_path / "a", artifact_dir
+    )
     artifact = (await client.get(f"/api/v1/scans/{run_a}")).json()["artifacts"][0]
 
     served = await client.get(artifact["url"])
@@ -188,13 +195,21 @@ async def test_artifact_access_is_restricted_to_its_scan(
 async def test_comparison_with_previous_scan(client, session_factory, artifact_dir, tmp_path):
     project_id = await _project(client)
     first = (await _scan(client, project_id)).json()["id"]
-    await complete_run(session_factory, uuid.UUID(first),
-                       scan_result([finding("kept"), finding("fixed")]), tmp_path / "1",
-                       artifact_dir)
+    await complete_run(
+        session_factory,
+        uuid.UUID(first),
+        scan_result([finding("kept"), finding("fixed")]),
+        tmp_path / "1",
+        artifact_dir,
+    )
     second = (await _scan(client, project_id)).json()["id"]
-    await complete_run(session_factory, uuid.UUID(second),
-                       scan_result([finding("kept"), finding("new")]), tmp_path / "2",
-                       artifact_dir)
+    await complete_run(
+        session_factory,
+        uuid.UUID(second),
+        scan_result([finding("kept"), finding("new")]),
+        tmp_path / "2",
+        artifact_dir,
+    )
 
     comparison = (await client.get(f"/api/v1/scans/{second}/comparison")).json()
     assert comparison["previous_run_id"] == first
@@ -226,8 +241,13 @@ async def test_deleting_a_project_removes_its_scans_and_files(
 ):
     project_id = await _project(client)
     run_id = (await _scan(client, project_id)).json()["id"]
-    await complete_run(session_factory, uuid.UUID(run_id), scan_result([finding("x")]),
-                       tmp_path / "w", artifact_dir)
+    await complete_run(
+        session_factory,
+        uuid.UUID(run_id),
+        scan_result([finding("x")]),
+        tmp_path / "w",
+        artifact_dir,
+    )
     assert (artifact_dir / run_id).is_dir()
     assert (await client.delete(f"/api/v1/projects/{project_id}")).status_code == 204
     assert (await client.get(f"/api/v1/scans/{run_id}")).status_code == 404

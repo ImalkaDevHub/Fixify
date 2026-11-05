@@ -19,8 +19,13 @@ WINDOW = Window(datetime(2026, 1, 1, tzinfo=UTC), datetime(2026, 1, 1, tzinfo=UT
 
 
 def _image(src="https://example.com/a.png", **overrides) -> ImageInfo:
-    values = {"has_alt": True, "decorative": False, "complete": True, "natural_width": 10,
-              "lazy": False}
+    values = {
+        "has_alt": True,
+        "decorative": False,
+        "complete": True,
+        "natural_width": 10,
+        "lazy": False,
+    }
     return ImageInfo(src=src, **{**values, **overrides})
 
 
@@ -62,25 +67,34 @@ def test_broken_images_are_confirmed_only_when_loading_finished():
 def test_broken_image_severity_depends_on_party():
     collector = FindingCollector()
     check_content(
-        _clean(images=[
-            _image("https://example.com/own.png", natural_width=0),
-            _image("https://cdn.other.net/x.png", natural_width=0),
-        ]),
-        100, PAGE, collector, WINDOW,
+        _clean(
+            images=[
+                _image("https://example.com/own.png", natural_width=0),
+                _image("https://cdn.other.net/x.png", natural_width=0),
+            ]
+        ),
+        100,
+        PAGE,
+        collector,
+        WINDOW,
     )
     severities = {f.affected_url: f.severity for f in collector.all()}
-    assert severities == {"https://example.com/own.png": "medium",
-                          "https://cdn.other.net/x.png": "low"}
+    assert severities == {
+        "https://example.com/own.png": "medium",
+        "https://cdn.other.net/x.png": "low",
+    }
 
 
 def test_missing_alt_ignores_decorative_images():
     _, findings = _run(
-        _clean(images=[
-            _image(has_alt=False),
-            _image("https://example.com/b.png", has_alt=False),
-            _image("https://example.com/deco.png", has_alt=False, decorative=True),
-            _image("https://example.com/empty-alt.png", has_alt=True),
-        ])
+        _clean(
+            images=[
+                _image(has_alt=False),
+                _image("https://example.com/b.png", has_alt=False),
+                _image("https://example.com/deco.png", has_alt=False, decorative=True),
+                _image("https://example.com/empty-alt.png", has_alt=True),
+            ]
+        )
     )
     finding = findings["missing_alt_text"]
     assert finding.severity == "low"
@@ -103,11 +117,13 @@ def test_info_findings_do_not_fail_the_check():
 
 def test_mixed_content_active_and_passive():
     _, findings = _run(
-        _clean(insecure=[
-            InsecureReference("script", "http://example.com/app.js"),
-            InsecureReference("iframe", "http://ads.example.net/frame"),
-            InsecureReference("img", "http://example.com/logo.png?key=hunter2"),
-        ])
+        _clean(
+            insecure=[
+                InsecureReference("script", "http://example.com/app.js"),
+                InsecureReference("iframe", "http://ads.example.net/frame"),
+                InsecureReference("img", "http://example.com/logo.png?key=hunter2"),
+            ]
+        )
     )
     active, passive = findings["mixed_content_active"], findings["mixed_content_passive"]
     assert (active.severity, active.evidence["count"]) == ("high", 2)
@@ -131,8 +147,11 @@ def test_snapshot_parsing_rejects_hostile_values():
         {
             "h1Count": "lots",
             "metaDescription": ["not", "a", "string"],
-            "images": [{"src": 5}, "junk", {"src": "https://e.com/x" + "a" * 5000,
-                                            "naturalWidth": -3, "complete": 1}],
+            "images": [
+                {"src": 5},
+                "junk",
+                {"src": "https://e.com/x" + "a" * 5000, "naturalWidth": -3, "complete": 1},
+            ],
             "insecure": [{"tag": "SCRIPT", "url": "http://e.com/x.js"}, {"url": "http://y"}],
             "timing": {"load": True, "domContentLoaded": 1234.6},
         }

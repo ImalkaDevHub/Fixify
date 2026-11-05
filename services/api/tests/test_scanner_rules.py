@@ -60,8 +60,9 @@ def test_first_party_detection():
 def test_collector_deduplicates_and_counts_occurrences():
     collector = FindingCollector()
     for _ in range(3):
-        checks.check_console([ConsoleEvent("boom", "https://shop.example.com/app.js")], SITE,
-                             collector, WINDOW)
+        checks.check_console(
+            [ConsoleEvent("boom", "https://shop.example.com/app.js")], SITE, collector, WINDOW
+        )
     findings = collector.all()
     assert len(findings) == 1
     assert findings[0].evidence["occurrences"] == 3
@@ -178,8 +179,9 @@ def test_an_error_page_is_not_a_successful_document_load():
 def test_page_basics():
     collector = FindingCollector()
     result = checks.check_page_basics(
-        PageSnapshot(title="  ", h1_count=0, has_viewport_meta=True, icon_declared=False,
-                     favicon_status=404),
+        PageSnapshot(
+            title="  ", h1_count=0, has_viewport_meta=True, icon_declared=False, favicon_status=404
+        ),
         SITE,
         collector,
         WINDOW,
@@ -252,11 +254,18 @@ def test_evidence_is_bounded():
 
 def test_scan_result_round_trips_as_json():
     check = CheckResult(
-        name="n", check_type="t", status="passed", target_url=SITE, summary="s",
-        started_at=NOW, finished_at=NOW, duration_ms=0,
+        name="n",
+        check_type="t",
+        status="passed",
+        target_url=SITE,
+        summary="s",
+        started_at=NOW,
+        finished_at=NOW,
+        duration_ms=0,
     )
-    result = ScanResult(requested_url=SITE, started_at=NOW, finished_at=NOW,
-                        outcome="completed", checks=[check])
+    result = ScanResult(
+        requested_url=SITE, started_at=NOW, finished_at=NOW, outcome="completed", checks=[check]
+    )
     assert ScanResult.model_validate_json(result.model_dump_json()) == result
     assert (result.passed_count, result.failed_count, result.error_count) == (1, 0, 0)
 

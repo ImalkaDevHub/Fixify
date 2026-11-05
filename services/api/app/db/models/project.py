@@ -16,9 +16,7 @@ class Project(Base):
         Index("ix_projects_owner_created", "owner_id", "created_at"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     # NULL only for projects created before authentication existed. Such projects are visible
     # to nobody until `python -m app.cli assign-orphans` gives them an owner.
     owner_id: Mapped[uuid.UUID | None] = mapped_column(
