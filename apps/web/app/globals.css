@@ -95,6 +95,17 @@ body {
   color: transparent;
 }
 
+.filament-flow {
+  stroke-dasharray: 6 22;
+  animation: filament-drift 24s linear infinite;
+}
+
+@keyframes filament-drift {
+  to {
+    stroke-dashoffset: -280;
+  }
+}
+
 .skeleton {
   background: linear-gradient(90deg, rgba(38, 50, 73, 0.55) 0px, rgba(56, 72, 102, 0.6) 60px, rgba(38, 50, 73, 0.55) 120px);
   background-size: 800px 100%;
@@ -119,6 +130,10 @@ body {
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
+  }
+
+  .filament-flow {
+    animation: none;
   }
 }
 
