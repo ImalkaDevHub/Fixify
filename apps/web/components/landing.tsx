@@ -68,7 +68,7 @@ function ProductPreview() {
     { title: "3 image(s) without alternative text", severity: "low", type: "Accessibility" },
   ];
   return (
-    <motion.div initial={{ opacity: 0, y: 28, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: 0.7, delay: 0.25, ease: [0.22, 1, 0.36, 1] }} className="relative mx-auto mt-16 max-w-5xl">
+    <motion.div initial={{ opacity: 0, y: 28, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: 0.7, delay: 0.25, ease: [0.22, 1, 0.36, 1] }} className="relative mx-auto max-w-5xl">
       <div className="absolute -inset-x-10 -top-10 bottom-0 -z-10 rounded-[40px] bg-gradient-to-b from-violet/20 via-cyan/5 to-transparent blur-3xl" aria-hidden />
       <Card className="overflow-hidden border-line/80 bg-panel/90 backdrop-blur">
         <div className="flex items-center gap-2 border-b border-line-soft px-4 py-2.5">
@@ -133,9 +133,9 @@ export function LandingPage() {
       </header>
 
       <main>
-        <section className="relative">
+        <section className="relative flex min-h-[calc(100svh-4rem)] items-center">
           <div className="grid-backdrop pointer-events-none absolute inset-0 -z-0" aria-hidden />
-          <div className="relative mx-auto max-w-6xl px-5 pb-10 pt-20 text-center sm:pt-28">
+          <div className="relative mx-auto w-full max-w-6xl px-5 py-20 text-center sm:py-28">
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
               <h1 className="mx-auto max-w-4xl text-[40px] font-semibold leading-[1.05] tracking-tight sm:text-[64px]">
                 Find Bugs. <span className="text-gradient">Understand Them.</span> Fix Them.
@@ -148,6 +148,12 @@ export function LandingPage() {
                 <ButtonLink href="#how" size="lg" variant="secondary">Explore Features</ButtonLink>
               </div>
             </motion.div>
+          </div>
+        </section>
+
+        <section aria-label="Product preview" className="relative border-y border-line-soft/70 bg-panel/30 px-5 py-12 sm:py-16">
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-violet/[0.04] via-transparent to-cyan/[0.03]" aria-hidden />
+          <div className="relative">
             <ProductPreview />
           </div>
         </section>
