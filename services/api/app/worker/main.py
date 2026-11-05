@@ -18,11 +18,12 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.core.artifacts import cleanup_expired
+from app.core.artifacts import artifact_root_state, cleanup_expired, database_identity
 from app.core.config import Settings
 from app.repositories import scan as scan_repository
 from app.scanner.contract import ScanJob
 from app.services.scan import policy_config, scan_limits
+from app.services.scan_events import notify_run
 from app.worker import executor
 from app.worker.persistence import persist_result
 from app.worker.queue import ScanQueue
@@ -115,6 +116,7 @@ class ScanWorker:
             if run is None:
                 return
             logger.info("Scanning run %s (attempt %d): %s", run_id, attempt, run.target_url)
+            await notify_run(self.sessions, run_id, "started")
             job = ScanJob(
                 run_id=str(run_id),
                 target_url=run.target_url,
@@ -139,6 +141,7 @@ class ScanWorker:
                     max_artifact_bytes=self.settings.artifact_max_bytes,
                 )
             if stored:
+                await notify_run(self.sessions, run_id, "finished")
                 logger.info(
                     "Run %s finished: %s, %d finding(s)",
                     run_id,
@@ -184,7 +187,7 @@ class ScanWorker:
                         with contextlib.suppress(Exception):
                             await self.queue.enqueue(run_id)
                         return
-                await scan_repository.transition(
+                failed = await scan_repository.transition(
                     session,
                     run_id,
                     from_status="running",
@@ -193,6 +196,8 @@ class ScanWorker:
                     failure_reason=reason[:500],
                     finished_at=_now(),
                 )
+            if failed:
+                await notify_run(self.sessions, run_id, "failed")
         except Exception:  # noqa: BLE001 - the stale-run sweep is the last line of defence
             logger.exception("Could not record failure for run %s", run_id)
 
@@ -213,8 +218,20 @@ class ScanWorker:
 
     async def cleanup_artifacts(self) -> None:
         try:
-            async with self.sessions() as session:
-                known = await scan_repository.all_run_ids(session)
+            state = artifact_root_state(
+                self.settings.artifact_dir, database_identity(self.settings.database_url)
+            )
+            if state == "foreign":
+                logger.warning(
+                    "Artifact directory %s belongs to another database; cleanup skipped. "
+                    "Use a separate ARTIFACT_DIR per database.",
+                    self.settings.artifact_dir,
+                )
+                return
+            known = None
+            if state == "owned":  # orphans are only removed from a directory we own
+                async with self.sessions() as session:
+                    known = await scan_repository.all_run_ids(session)
             await asyncio.to_thread(
                 cleanup_expired,
                 self.settings.artifact_dir,

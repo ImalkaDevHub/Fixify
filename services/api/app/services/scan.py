@@ -30,6 +30,7 @@ from app.schemas.scan import (
     ScanCreate,
     SeverityCounts,
 )
+from app.services import site_verification
 from app.worker.queue import QueueUnavailableError, ScanQueue
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,7 @@ CHECK_ORDER = (
     "http_errors",
     "screenshot",
     "page_basics",
+    "content_checks",
     "broken_links",
 )
 
@@ -57,6 +59,14 @@ class ScanError(Exception):
 
 class ProjectNotFoundError(ScanError):
     status_code = 404
+
+
+class RunNotFoundError(ScanError):
+    status_code = 404
+
+
+class SiteNotVerifiedError(ScanError):
+    status_code = 403
 
 
 class TargetNotAllowedError(ScanError):
@@ -100,16 +110,28 @@ async def create_scan(
     session: AsyncSession,
     queue: ScanQueue,
     settings: Settings,
+    owner_id: uuid.UUID,
     project_id: uuid.UUID,
     options: ScanCreate,
     policy: UrlPolicy | None = None,
+    *,
+    trigger: str = "manual",
 ) -> TestRun:
-    project = await project_repository.get_project(session, project_id)
+    project = await project_repository.get_project(session, project_id, owner_id)
     if project is None:
         raise ProjectNotFoundError("Project not found.")
     target_url = str(options.target_url) if options.target_url else project.website_url
+    if settings.site_verification_required:
+        if not site_verification.is_verified(project):
+            raise SiteNotVerifiedError(
+                "Verify that you control this website before scanning it "
+                "(project settings, Ownership verification)."
+            )
+        if site_verification.host_of(target_url) != project.verified_host:
+            raise TargetNotAllowedError("Only the verified website's host can be scanned.")
+    requested = options.max_links if options.max_links is not None else project.scan_max_links
     max_links = min(
-        options.max_links if options.max_links is not None else settings.scanner_max_links,
+        requested if requested is not None else settings.scanner_max_links,
         settings.scanner_max_links,
     )
 
@@ -123,11 +145,20 @@ async def create_scan(
 
     if await scan_repository.count_active(session, project_id):
         raise ScanConflictError("A scan for this project is already queued or running.")
+    if (
+        await scan_repository.count_active(session, owner_id=owner_id)
+        >= settings.max_active_scans_per_user
+    ):
+        raise ScanCapacityError(
+            f"You already have {settings.max_active_scans_per_user} scans queued or running. "
+            "Wait for one to finish."
+        )
     if await scan_repository.count_active(session) >= settings.scanner_max_queued_scans:
         raise ScanCapacityError("Too many scans are waiting. Try again in a few minutes.")
 
     run = await scan_repository.create_run(
-        session, project_id=project_id, target_url=target_url, max_links=max_links
+        session, project_id=project_id, target_url=target_url, max_links=max_links,
+        trigger=trigger,
     )
     try:
         await queue.enqueue(run.id)
@@ -169,6 +200,7 @@ def run_summary(run: TestRun) -> RunSummary:
         id=run.id,
         project_id=run.project_id,
         status=run.status,  # type: ignore[arg-type]
+        trigger=run.trigger or "manual",  # type: ignore[arg-type]
         target_url=run.target_url,
         final_url=run.final_url,
         failure_reason=run.failure_reason,
@@ -196,16 +228,23 @@ def run_summary(run: TestRun) -> RunSummary:
 
 
 async def list_scans(
-    session: AsyncSession, project_id: uuid.UUID, *, limit: int, offset: int
+    session: AsyncSession,
+    owner_id: uuid.UUID,
+    project_id: uuid.UUID,
+    *,
+    limit: int,
+    offset: int,
 ) -> list[RunSummary]:
-    if await project_repository.get_project(session, project_id) is None:
+    if await project_repository.get_project(session, project_id, owner_id) is None:
         raise ProjectNotFoundError("Project not found.")
     runs = await scan_repository.list_runs(session, project_id, limit=limit, offset=offset)
     return [run_summary(run) for run in runs]
 
 
-async def get_scan(session: AsyncSession, run_id: uuid.UUID) -> RunDetail | None:
-    run = await scan_repository.get_run(session, run_id)
+async def get_scan(
+    session: AsyncSession, owner_id: uuid.UUID, run_id: uuid.UUID
+) -> RunDetail | None:
+    run = await scan_repository.get_owned_run(session, run_id, owner_id)
     if run is None:
         return None
     checks = sorted(
@@ -224,13 +263,14 @@ async def get_scan(session: AsyncSession, run_id: uuid.UUID) -> RunDetail | None
 
 async def list_run_findings(
     session: AsyncSession,
+    owner_id: uuid.UUID,
     run_id: uuid.UUID,
     *,
     severity: str | None,
     limit: int,
     offset: int,
 ) -> list[Finding] | None:
-    if await scan_repository.get_run(session, run_id) is None:
+    if await scan_repository.get_owned_run(session, run_id, owner_id) is None:
         return None
     return await scan_repository.list_run_findings(
         session, run_id, severity=severity, limit=limit, offset=offset
@@ -239,21 +279,24 @@ async def list_run_findings(
 
 async def list_project_findings(
     session: AsyncSession,
+    owner_id: uuid.UUID,
     project_id: uuid.UUID,
     *,
     severity: str | None,
     limit: int,
     offset: int,
 ) -> list[Finding]:
-    if await project_repository.get_project(session, project_id) is None:
+    if await project_repository.get_project(session, project_id, owner_id) is None:
         raise ProjectNotFoundError("Project not found.")
     return await scan_repository.list_project_findings(
         session, project_id, severity=severity, limit=limit, offset=offset
     )
 
 
-async def get_finding(session: AsyncSession, finding_id: uuid.UUID) -> FindingDetail | None:
-    finding = await scan_repository.get_finding(session, finding_id)
+async def get_finding(
+    session: AsyncSession, owner_id: uuid.UUID, finding_id: uuid.UUID
+) -> FindingDetail | None:
+    finding = await scan_repository.get_owned_finding(session, finding_id, owner_id)
     if finding is None:
         return None
     artifact = None
@@ -270,8 +313,10 @@ async def get_finding(session: AsyncSession, finding_id: uuid.UUID) -> FindingDe
     return FindingDetail(**base, artifact=artifact)
 
 
-async def compare_scan(session: AsyncSession, run_id: uuid.UUID) -> RunComparison | None:
-    run = await scan_repository.get_run(session, run_id)
+async def compare_scan(
+    session: AsyncSession, owner_id: uuid.UUID, run_id: uuid.UUID
+) -> RunComparison | None:
+    run = await scan_repository.get_owned_run(session, run_id, owner_id)
     if run is None:
         return None
     previous = await scan_repository.previous_finished_run(session, run)
@@ -297,8 +342,14 @@ async def compare_scan(session: AsyncSession, run_id: uuid.UUID) -> RunCompariso
 
 
 async def artifact_file(
-    session: AsyncSession, artifact_root: Path, run_id: uuid.UUID, artifact_id: uuid.UUID
+    session: AsyncSession,
+    owner_id: uuid.UUID,
+    artifact_root: Path,
+    run_id: uuid.UUID,
+    artifact_id: uuid.UUID,
 ) -> tuple[ScanArtifact, Path] | None:
+    if await scan_repository.get_owned_run(session, run_id, owner_id) is None:
+        return None
     artifact = await scan_repository.get_artifact(session, run_id, artifact_id)
     if artifact is None:
         return None
@@ -328,11 +379,33 @@ async def latest_scans(
     }
 
 
-async def dashboard_summary(session: AsyncSession) -> DashboardSummary:
-    latest = await scan_repository.latest_runs_for_projects(session, None, finished_only=True)
+async def cancel_scan(
+    session: AsyncSession, owner_id: uuid.UUID, run_id: uuid.UUID
+) -> RunSummary:
+    if await scan_repository.get_owned_run(session, run_id, owner_id) is None:
+        raise RunNotFoundError("Scan not found.")
+    cancelled = await scan_repository.transition(
+        session,
+        run_id,
+        from_status="queued",
+        status="cancelled",
+        failure_reason="Cancelled before it started.",
+        finished_at=datetime.now(UTC),
+    )
+    if not cancelled:
+        raise ScanConflictError("Only queued scans can be cancelled.")
+    run = await scan_repository.get_run(session, run_id)
+    assert run is not None
+    return run_summary(run)
+
+
+async def dashboard_summary(session: AsyncSession, owner_id: uuid.UUID) -> DashboardSummary:
+    latest = await scan_repository.latest_runs_for_projects(
+        session, None, finished_only=True, owner_id=owner_id
+    )
     return DashboardSummary(
-        project_count=await project_repository.count_projects(session),
-        scan_count=await scan_repository.count_runs(session),
-        active_scan_count=await scan_repository.count_active(session),
+        project_count=await project_repository.count_projects(session, owner_id),
+        scan_count=await scan_repository.count_runs(session, owner_id),
+        active_scan_count=await scan_repository.count_active(session, owner_id=owner_id),
         latest_findings_count=sum(run.findings_count for run in latest.values()),
     )

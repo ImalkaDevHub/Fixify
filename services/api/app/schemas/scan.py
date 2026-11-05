@@ -48,6 +48,7 @@ class RunSummary(BaseModel):
     id: uuid.UUID
     project_id: uuid.UUID
     status: RunStatus
+    trigger: Literal["manual", "scheduled"] = "manual"
     target_url: str
     final_url: str | None
     failure_reason: str | None

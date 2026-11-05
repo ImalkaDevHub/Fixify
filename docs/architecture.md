@@ -1,58 +1,69 @@
 # Fixify architecture
 
-## Components
+## Processes
 
-- **Web (`apps/web`)**: App Router pages render the dashboard, projects, scan reports (`/scans/[runId]`), and findings (`/findings/[findingId]`). Client components use the centralized typed API client (`lib/api.ts`). Scan status updates use a bounded, non-overlapping polling hook (`lib/use-polling.ts`) that stops on terminal states, on unmount, after repeated errors, or after 15 minutes. Zod validation mirrors the backend project constraints.
-- **API (`services/api/app`)**: versioned FastAPI routers validate HTTP requests and delegate to services. Services coordinate repository operations; repositories encapsulate SQL queries. Pydantic schemas define the API contract. The API never launches a browser.
-- **Worker (`app/worker`)**: claims queued scan runs, starts the scanner process, enforces the hard time limit, records heartbeats, retries crashed attempts, recovers runs from dead workers, writes results in one transaction, and applies artifact retention.
-- **Scanner (`app/scanner`)**: an isolated process (`python -m app.scanner`) started without database or Redis credentials. It enforces the URL policy through a local egress proxy, drives headless Chromium with Playwright, and returns a typed `ScanResult`. Its modules are separately testable: `url_policy`, `egress_proxy`, `links`, `checks` (pure rules), `classify` (severity, fingerprints, deduplication), `sanitize`, `engine` (Playwright orchestration), `contract` (types).
-- **Persistence**: async SQLAlchemy sessions; Alembic owns all schema changes (`0001_projects`, `0002_scans`). Tables: `projects`, `test_runs`, `test_case_results`, `findings`, `scan_artifacts`. Evidence uses JSONB.
-- **Infrastructure (`infra`)**: Compose runs PostgreSQL and Redis with local-only port bindings, health checks, and persistent volumes, plus an opt-in `worker` service (profile `worker`) with resource and privilege limits.
-
-## Project creation request flow
-
-1. The browser validates the project form with Zod.
-2. The API client sends JSON to `POST /api/v1/projects`.
-3. FastAPI/Pydantic validates the payload and injects an async database session.
-4. The project service delegates persistence to the repository.
-5. SQLAlchemy commits the project; the response schema serializes its UUID and timezone-aware timestamps.
-6. The UI navigates to the returned project detail route.
-
-## Scan request flow
-
-1. **Run scan** sends `POST /api/v1/projects/{id}/scans`.
-2. The API checks the project, the URL policy, and the active-scan limits, creates a `queued` run, enqueues its ID (Redis, or nothing with `QUEUE_BACKEND=database`), and returns `202`. A queue failure marks the run `failed` and returns `503`.
-3. A worker claims the run atomically (`queued → running`), builds a `ScanJob`, and runs `python -m app.scanner` with a minimal environment.
-4. The scanner starts the egress proxy and Chromium, navigates, observes events, runs the checks, captures a screenshot, validates links, and prints a `ScanResult`.
-5. The worker copies the screenshot into the artifact store and writes checks, findings, artifact rows, counters, and the terminal status in one transaction.
-6. The frontend polls `GET /api/v1/scans/{id}` until the status is terminal, then loads findings and the comparison with the previous scan.
-
-The full lifecycle, data model, check catalog, and security boundaries are in [scanner.md](scanner.md).
-
-## API
-
-| Method | Path | Purpose |
+| Process | Command | Role |
 |---|---|---|
-| `POST` | `/api/v1/projects/{project_id}/scans` | Queue a scan (`202`) |
-| `GET` | `/api/v1/projects/{project_id}/scans` | Scan history, newest first, paginated |
-| `GET` | `/api/v1/projects/{project_id}/findings` | Findings across scans, `severity` filter, paginated |
-| `GET` | `/api/v1/scans/summary` | Dashboard counts |
-| `GET` | `/api/v1/scans/{run_id}` | Status, counters, checks, artifacts |
-| `POST` | `/api/v1/scans/{run_id}/cancel` | Cancel a queued scan |
-| `GET` | `/api/v1/scans/{run_id}/findings` | Findings of one scan, most severe first, `severity` filter |
-| `GET` | `/api/v1/scans/{run_id}/comparison` | New / no longer seen / unchanged vs. the previous finished scan |
-| `GET` | `/api/v1/scans/{run_id}/artifacts/{artifact_id}` | Serve an artifact that belongs to that scan |
-| `GET` | `/api/v1/findings/{finding_id}` | One finding with sanitized evidence |
-| `GET` | `/api/v1/health/ready` | PostgreSQL, plus Redis when it is the queue |
+| Web app | `npm run dev` / `next start` (apps/web) | Next.js 16 App Router UI. Rewrites `/api/v1/*` to FastAPI so the browser stays on one origin. `proxy.ts` redirects signed-out visitors; real authorization is always done by the API. |
+| API | `python -m app.serve` (services/api) | FastAPI. Validates requests, enforces ownership, queues work, returns results. Never runs a browser, an AI call, or a GitHub write in a request handler. |
+| Worker | `python -m app.worker` | Runs three loops: the **scan worker**, the **job worker** (AI analysis, fix generation, pull requests), and the **scheduler**. |
+| Scanner | started by the worker per scan | Isolated subprocess with a stripped environment (no DB/Redis credentials), egress proxy, headless Chromium. |
 
-Project list and detail responses include `latest_scan` (status, time, findings count). All endpoints are documented in the OpenAPI schema at `/docs`.
+PostgreSQL is the source of truth for every run and job. Redis (optional) only announces scan IDs promptly.
 
-## Boundaries and future work
+## Backend layering
 
-There is no authentication or user ownership: anyone who can reach the API can create projects, start scans, and read every result. Add authentication, authorization, ownership filtering, ownership verification of scanned websites, and rate limits before any shared or public deployment.
+`Router → Pydantic schema → Service → Repository → SQLAlchemy model`. Routers translate HTTP to service calls and service errors back to HTTP. Every user-facing repository query takes an `owner_id`; unscoped lookups exist only for the worker (`get_project_unscoped`, `get_run`).
 
-Security requirements for later steps:
+| Module | Purpose |
+|---|---|
+| `app/api/deps.py` | Session cookie authentication, CSRF and Origin checks, verified-email gate, rate limits |
+| `app/services/auth.py` | Registration, login, rotating refresh tokens, email tokens, password changes, account deletion |
+| `app/services/project.py`, `scan.py` | Projects and scans (ownership, limits, comparison) |
+| `app/services/analysis.py` | AI finding analysis (worker handler) |
+| `app/services/github.py`, `repository_files.py` | OAuth, encrypted tokens, repository selection, allow-listed file access |
+| `app/services/fixes.py`, `fix_validation.py` | Fix generation, validation, review state machine, pull requests |
+| `app/services/jobs.py`, `app/worker/jobs.py` | Background job queue and worker |
+| `app/services/notifications.py`, `scan_events.py` | In-app notifications and preferences |
+| `app/services/schedules.py`, `app/worker/scheduler.py` | Scheduled scans |
+| `app/services/analytics.py` | Charts data from persisted scans |
+| `app/ai/provider.py`, `prompts.py` | Provider abstraction (Anthropic SDK), prompts, schemas, untrusted-content boundary |
+| `app/integrations/github.py` | Minimal GitHub REST client |
 
-- Every project, scan, finding, and artifact query must be scoped to an authenticated owner.
-- Website pages and repository contents are untrusted input. Future AI analysis must treat them as data, never as instructions, and must not give model output direct access to credentials, the database, or the network.
-- Move browsing to a container or VM whose network has internet egress only, and separate result persistence from the process that browses (see the limitations in [scanner.md](scanner.md)).
+## Data model
+
+```text
+users 1─* user_sessions, user_tokens, 1─1 github_connections, user_preferences, *─ notifications
+users 1─* projects 1─* test_runs 1─* test_case_results, findings, scan_artifacts
+projects 1─1 scan_schedules
+findings 1─* ai_analyses
+findings 1─* fix_proposals 1─* fix_reviews, 1─1 pull_requests
+projects 1─* background_jobs (subject = finding or fix)
+```
+
+Migrations: `0001_projects`, `0002_scans`, `0003_auth` (users, sessions, tokens, `projects.owner_id`), and `0004_platform` (jobs, analyses, GitHub connections, fixes, reviews, pull requests, notifications, preferences, schedules, project scan settings, `test_runs.trigger`). `0005_site_verification` adds the project ownership-verification fields. All primary keys are UUIDs. Deleting a user cascades to everything they own. Screenshots stay on disk under `ARTIFACT_DIR`; fixes store bounded snippets plus the Git blob SHA, never whole files.
+
+## Main flows
+
+**Scan.** `POST /projects/{id}/scans` (verified owner, URL policy, per-user and global limits) → `test_runs` row `queued` → the worker claims it atomically → scanner subprocess → results and terminal status in one transaction → notifications.
+
+**Analysis.** `POST /findings/{id}/analysis` → `background_jobs` (`analyze_finding`, idempotent while active) → the job worker builds a prompt from sanitized evidence (plus allow-listed repository paths when connected) → schema-checked JSON → model-supplied paths and IDs are filtered to known values → `ai_analyses` row and job success in one transaction.
+
+**Fix.** `POST /findings/{id}/fixes` → `generate_fix` job → repository snapshot (branch head and tree) → up to `GITHUB_MAX_FILES_PER_FIX` allow-listed files → model returns edits → each edit must match its file exactly once → syntax checks → `fix_proposals` (`pending_review` or `failed_validation`).
+
+**Review and pull request.** Approve, reject, reopen, or comment (`fix_reviews`) → `POST /fixes/{id}/pull-request` (approved only) → `create_pull_request` job → edits are re-applied against the *current* branch head (a conflict fails safely) → blobs, tree, commit, new `fixify/fix-…` branch, pull request → fix `applied`. Retries reuse an existing branch or pull request.
+
+**Schedules.** The scheduler claims due schedules with a conditional update on `next_run_at`, so concurrent workers cannot start a scheduled scan twice, then creates the scan with `trigger="scheduled"`.
+
+## Reliability
+
+| Mechanism | Scans | Jobs |
+|---|---|---|
+| Atomic claim (`queued → running`, attempt + 1) | ✓ | ✓ |
+| Heartbeat while running | 15 s | 15 s |
+| Stale recovery | 90 s | 180 s |
+| Bounded retries | `SCAN_MAX_ATTEMPTS` | `JOB_MAX_ATTEMPTS`, exponential backoff, transient errors only |
+| Result and status in one transaction, owner attempt only | ✓ | ✓ |
+| Visible failure reason | `failure_reason` | `error` and a `job_failed` notification |
+
+All of these are at-least-once execution with idempotent storage, not exactly-once execution.

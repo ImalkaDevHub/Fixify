@@ -1,17 +1,24 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
-import { AppShell } from "@/components/layout/app-shell";
+import { Providers } from "./providers";
+
+const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "swap" });
+const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono-jb", display: "swap" });
 
 export const metadata: Metadata = {
-  title: "Fixify — Website quality workspace",
-  description: "Manage the websites you plan to test with Fixify.",
+  title: { default: "Fixify — Find bugs. Understand them. Fix them.", template: "%s · Fixify" },
+  description:
+    "An intelligent website testing platform that detects real-world issues, explains what went wrong, and helps your team generate human-reviewed fixes.",
 };
+
+export const viewport: Viewport = { themeColor: "#090D1A", colorScheme: "dark" };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en">
-      <body>
-        <AppShell>{children}</AppShell>
+    <html lang="en" className={`${inter.variable} ${mono.variable}`}>
+      <body className="min-h-screen">
+        <Providers>{children}</Providers>
       </body>
     </html>
   );

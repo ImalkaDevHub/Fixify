@@ -1,20 +1,36 @@
-import uuid
+import os
 
-import pytest
-from httpx import ASGITransport, AsyncClient
-from sqlalchemy import event
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
+# Must run before any application import: tests never read a developer's .env, and password
+# hashing uses the cheapest Argon2 parameters so the suite stays fast.
+os.environ["FIXIFY_IGNORE_ENV_FILE"] = "1"
+os.environ.setdefault("PASSWORD_HASH_MEMORY_KIB", "1024")
+os.environ.setdefault("PASSWORD_HASH_TIME_COST", "1")
+os.environ.setdefault("EMAIL_BACKEND", "disabled")
 
-from app.api.v1.scans import get_queue, get_url_policy
-from app.core.config import settings
-from app.db import models  # noqa: F401
-from app.db.base import Base
-from app.db.session import get_session
-from app.main import app
-from app.scanner.contract import PolicyConfig
-from app.scanner.url_policy import UrlPolicy
-from app.worker.queue import QueueUnavailableError
+import uuid  # noqa: E402
+from datetime import UTC, datetime  # noqa: E402
+
+import pytest  # noqa: E402
+from httpx import ASGITransport, AsyncClient  # noqa: E402
+from sqlalchemy import event  # noqa: E402
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
+from sqlalchemy.pool import StaticPool  # noqa: E402
+
+from app.api.v1.scans import get_queue, get_url_policy  # noqa: E402
+from app.core.config import settings  # noqa: E402
+from app.core.email import EmailMessage, get_email_sender  # noqa: E402
+from app.core.rate_limit import MemoryRateLimiter, get_rate_limiter  # noqa: E402
+from app.db import models  # noqa: E402, F401
+from app.db.base import Base  # noqa: E402
+from app.db.models.user import User  # noqa: E402
+from app.db.session import get_session  # noqa: E402
+from app.main import app  # noqa: E402
+from app.scanner.contract import PolicyConfig  # noqa: E402
+from app.scanner.url_policy import UrlPolicy  # noqa: E402
+from app.services import auth as auth_service  # noqa: E402
+from app.worker.queue import QueueUnavailableError  # noqa: E402
+
+PASSWORD = "correct horse battery"
 
 # Fake DNS used by every test: no test depends on real DNS or internet access.
 FAKE_DNS = {
@@ -92,8 +108,34 @@ def artifact_dir(tmp_path, monkeypatch):
     return directory
 
 
+class Outbox:
+    """Captures outgoing email instead of sending it."""
+
+    def __init__(self) -> None:
+        self.messages: list[EmailMessage] = []
+
+    async def send(self, message: EmailMessage) -> None:
+        self.messages.append(message)
+
+    def token(self, subject_part: str) -> str:
+        for message in reversed(self.messages):
+            if subject_part.lower() in message.subject.lower():
+                return message.text.split("#token=", 1)[1].split()[0]
+        raise AssertionError(f"No email with {subject_part!r} in the subject")
+
+
 @pytest.fixture
-async def client(session_factory, fake_queue, artifact_dir):
+def outbox() -> Outbox:
+    return Outbox()
+
+
+@pytest.fixture
+def rate_limiter() -> MemoryRateLimiter:
+    return MemoryRateLimiter()
+
+
+@pytest.fixture
+def app_overrides(session_factory, fake_queue, artifact_dir, outbox, rate_limiter):
     async def override_session():
         async with session_factory() as session:
             yield session
@@ -104,6 +146,76 @@ async def client(session_factory, fake_queue, artifact_dir):
     app.dependency_overrides[get_session] = override_session
     app.dependency_overrides[get_queue] = override_queue
     app.dependency_overrides[get_url_policy] = lambda: fake_policy()
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as test_client:
-        yield test_client
+    app.dependency_overrides[get_email_sender] = lambda: outbox
+    app.dependency_overrides[get_rate_limiter] = lambda: rate_limiter
+    yield
     app.dependency_overrides.clear()
+
+
+async def create_user(
+    session_factory, email: str, *, verified: bool = True, password: str = PASSWORD
+) -> User:
+    async with session_factory() as session:
+        user = await auth_service.register(
+            session, email=email, password=password, display_name=email.split("@")[0],
+            config=settings,
+        )
+        if verified:
+            user.email_verified_at = datetime.now(UTC)
+            await session.commit()
+        return user
+
+
+async def sign_in(test_client: AsyncClient, email: str, password: str = PASSWORD) -> None:
+    response = await test_client.post(
+        "/api/v1/auth/login", json={"email": email, "password": password}
+    )
+    assert response.status_code == 200, response.text
+    test_client.headers["X-CSRF-Token"] = test_client.cookies["fixify_csrf"]
+
+
+def new_client() -> AsyncClient:
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+
+@pytest.fixture
+async def anon_client(app_overrides):
+    async with new_client() as test_client:
+        yield test_client
+
+
+async def _signed_in(session_factory, email: str, verified: bool = True):
+    user = await create_user(session_factory, email, verified=verified)
+    test_client = new_client()
+    await sign_in(test_client, email)
+    test_client.user_id = user.id  # type: ignore[attr-defined]
+    return test_client
+
+
+@pytest.fixture
+async def client(app_overrides, session_factory):
+    """Signed in as a verified user; sends the CSRF header automatically."""
+    test_client = await _signed_in(session_factory, "owner@example.com")
+    try:
+        yield test_client
+    finally:
+        await test_client.aclose()
+
+
+@pytest.fixture
+async def other_client(app_overrides, session_factory):
+    """A second, unrelated verified user (for ownership-isolation tests)."""
+    test_client = await _signed_in(session_factory, "intruder@example.com")
+    try:
+        yield test_client
+    finally:
+        await test_client.aclose()
+
+
+@pytest.fixture
+async def unverified_client(app_overrides, session_factory):
+    test_client = await _signed_in(session_factory, "new@example.com", verified=False)
+    try:
+        yield test_client
+    finally:
+        await test_client.aclose()

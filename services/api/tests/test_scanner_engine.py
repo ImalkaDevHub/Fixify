@@ -200,6 +200,20 @@ def test_missing_title_and_basics(site, tmp_path):
 
 
 @requires_chromium
+def test_content_checks_in_a_real_browser(site, tmp_path):
+    result = _scan(site, "/content-issues", tmp_path)
+    types = _types(result)
+    assert types["multiple_h1"] == "info"
+    assert types["missing_meta_description"] == "info"
+    assert types["missing_alt_text"] == "low"
+    assert types["broken_image"] == "medium"  # first-party image that returned 404
+    alt = next(f for f in result.findings if f.finding_type == "missing_alt_text")
+    assert alt.evidence["count"] == 1  # the alt="" decorative image is not counted
+    details = next(c for c in result.checks if c.check_type == "content_checks").details
+    assert details["images_checked"] == 3 and details["broken_images"] == 1
+
+
+@requires_chromium
 def test_navigation_timeout(site, tmp_path):
     result = _scan(site, "/slow", tmp_path, navigation_timeout_seconds=2)
     assert result.outcome == "completed"

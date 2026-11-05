@@ -54,6 +54,34 @@ _PAGE_SNAPSHOT_JS = """() => ({
   iconDeclared: !!document.querySelector('link[rel~="icon" i]'),
   hrefs: Array.from(document.querySelectorAll('a[href]'), (a) => String(a.href).slice(0, 2048))
     .slice(0, 2000),
+  metaDescription: (() => {
+    const meta = document.querySelector('meta[name="description" i]');
+    return meta ? String(meta.getAttribute('content') || '').slice(0, 500) : null;
+  })(),
+  images: Array.from(document.images).slice(0, 300).map((img) => ({
+    src: String(img.currentSrc || img.src || '').slice(0, 2048),
+    hasAlt: img.hasAttribute('alt'),
+    decorative: img.getAttribute('aria-hidden') === 'true'
+      || ['presentation', 'none'].includes(String(img.getAttribute('role') || '').toLowerCase()),
+    complete: img.complete,
+    naturalWidth: img.naturalWidth,
+    lazy: String(img.getAttribute('loading') || '').toLowerCase() === 'lazy',
+  })),
+  insecure: location.protocol !== 'https:' ? [] : Array.from(document.querySelectorAll(
+    'script[src],iframe[src],img[src],link[rel~="stylesheet" i][href],audio[src],video[src],'
+    + 'source[src],embed[src],object[data]'
+  )).map((el) => ({
+    tag: el.tagName.toLowerCase(),
+    url: String(el.getAttribute('src') !== null ? el.src : (el.href || el.data || ''))
+      .slice(0, 2048),
+  })).filter((ref) => ref.url.startsWith('http:')).slice(0, 100),
+  timing: (() => {
+    const entry = performance.getEntriesByType('navigation')[0];
+    return entry ? {
+      load: Math.round(entry.loadEventEnd),
+      domContentLoaded: Math.round(entry.domContentLoadedEventEnd),
+    } : null;
+  })(),
 })"""
 
 CHECK_NAMES = {
@@ -63,6 +91,7 @@ CHECK_NAMES = {
     "failed_requests": "Failed network requests",
     "http_errors": "HTTP error responses",
     "page_basics": "Basic page checks",
+    "content_checks": "Content, accessibility & performance",
     "screenshot": "Screenshot",
     "broken_links": "Broken links",
 }
@@ -328,6 +357,20 @@ class ScanEngine:
                         icon_declared=bool(snapshot["iconDeclared"]),
                         favicon_status=favicon_status,
                     ),
+                    page_url,
+                    self.collector,
+                    Window(started, _now()),
+                )
+
+            started = _now()
+            if snapshot is None:
+                self.checks["content_checks"] = self._error_check(
+                    "content_checks", page_url, "The page content could not be inspected.", started
+                )
+            else:
+                self.checks["content_checks"] = checks.check_content(
+                    checks.content_snapshot(snapshot),
+                    nav.duration_ms,
                     page_url,
                     self.collector,
                     Window(started, _now()),

@@ -164,8 +164,13 @@ async def test_retry_replaces_results_instead_of_duplicating(session_factory, tm
             attempt = await scan_repository.claim_run(session, run_id, now)
         async with session_factory() as session:
             assert await persist_result(
-                session, run_id=run_id, attempt=attempt, result=result, work_dir=work,
-                artifact_root=root, max_artifact_bytes=10_000,
+                session,
+                run_id=run_id,
+                attempt=attempt,
+                result=result,
+                work_dir=work,
+                artifact_root=root,
+                max_artifact_bytes=10_000,
             )
 
     async with session_factory() as session:
@@ -185,8 +190,13 @@ async def test_result_from_a_superseded_attempt_is_discarded(session_factory, tm
         await scan_repository.claim_run(session, run_id, datetime.now(UTC))
     async with session_factory() as session:
         stored = await persist_result(
-            session, run_id=run_id, attempt=attempt, result=scan_result([finding("late")]),
-            work_dir=tmp_path, artifact_root=tmp_path / "a", max_artifact_bytes=10_000,
+            session,
+            run_id=run_id,
+            attempt=attempt,
+            result=scan_result([finding("late")]),
+            work_dir=tmp_path,
+            artifact_root=tmp_path / "a",
+            max_artifact_bytes=10_000,
         )
     assert stored is False
     assert (await _status(session_factory, run_id)).findings_count == 0
@@ -195,9 +205,7 @@ async def test_result_from_a_superseded_attempt_is_discarded(session_factory, tm
 async def test_cancelled_run_is_never_claimed(session_factory, worker_settings, monkeypatch):
     run_id = await _queued_run(session_factory)
     async with session_factory() as session:
-        await scan_repository.transition(
-            session, run_id, from_status="queued", status="cancelled"
-        )
+        await scan_repository.transition(session, run_id, from_status="queued", status="cancelled")
     monkeypatch.setattr(executor, "run_scanner", None)  # would crash if called
     worker = ScanWorker(worker_settings, session_factory, FakeQueue())
     await worker._slots.acquire()
@@ -215,3 +223,34 @@ def test_scanner_environment_excludes_application_secrets(monkeypatch):
 
 def test_stale_threshold_exceeds_heartbeat_interval():
     assert worker_main.STALE_AFTER_SECONDS >= 3 * worker_main.HEARTBEAT_SECONDS
+
+
+async def test_artifact_cleanup_never_touches_another_databases_folders(
+    session_factory, worker_settings, tmp_path
+):
+    import os
+    import time as _time
+
+    from app.core.artifacts import MARKER_FILE, database_identity
+
+    root = worker_settings.artifact_dir
+    foreign = root / str(uuid.uuid4())
+    foreign.mkdir(parents=True)
+    worker = ScanWorker(worker_settings, session_factory, FakeQueue())
+
+    await worker.cleanup_artifacts()  # first run claims the directory: orphans are kept
+    assert foreign.exists()
+    assert (root / MARKER_FILE).read_text().strip() == database_identity(
+        worker_settings.database_url
+    )
+
+    await worker.cleanup_artifacts()  # now owned: unknown run folders are orphans
+    assert not foreign.exists()
+
+    other = root / str(uuid.uuid4())
+    other.mkdir()
+    old = _time.time() - 400 * 86_400
+    os.utime(other, (old, old))
+    (root / MARKER_FILE).write_text("some-other-database\n")
+    await worker.cleanup_artifacts()  # another database's directory: nothing is deleted
+    assert other.exists()

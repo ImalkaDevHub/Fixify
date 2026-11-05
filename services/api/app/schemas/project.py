@@ -20,6 +20,8 @@ def _reject_control_characters(value: str) -> str:
 class ProjectCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     website_url: AnyHttpUrl = Field(max_length=2048)
+    description: str | None = Field(default=None, max_length=500)
+    scan_max_links: int | None = Field(default=None, ge=0, le=200)
     repo_full_name: str | None = Field(default=None, max_length=100)
     default_branch: str | None = Field(default=None, max_length=255)
 
@@ -30,6 +32,16 @@ class ProjectCreate(BaseModel):
         if not value:
             raise ValueError("Project name cannot be empty.")
         return value
+
+    @field_validator("description")
+    @classmethod
+    def clean_description(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        if any((ord(char) < 32 and char not in "\n\t") or ord(char) == 127 for char in value):
+            raise ValueError("Control characters are not allowed.")
+        return value or None
 
     @field_validator("repo_full_name")
     @classmethod
@@ -51,13 +63,33 @@ class ProjectCreate(BaseModel):
         return normalized or None
 
 
+class ProjectUpdate(ProjectCreate):
+    """Partial update: only the fields sent are changed. Blank optionals clear the value."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=100)  # type: ignore[assignment]
+    website_url: AnyHttpUrl | None = Field(default=None, max_length=2048)  # type: ignore[assignment]
+
+    @field_validator("name")
+    @classmethod
+    def strip_project_name(cls, value: str | None) -> str | None:  # type: ignore[override]
+        if value is None:
+            return None
+        return ProjectCreate.strip_project_name(value)
+
+
 class ProjectRead(BaseModel):
     id: uuid.UUID
     name: str
+    description: str | None = None
+    scan_max_links: int | None = None
     website_url: str
     repo_full_name: str | None
     github_repo_id: str | None
     default_branch: str | None
+    verified_host: str | None = None
+    verified_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 

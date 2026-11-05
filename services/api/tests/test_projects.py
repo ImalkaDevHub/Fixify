@@ -211,6 +211,7 @@ async def test_list_is_newest_first(client, session_factory):
             session.add(
                 Project(
                     name=name,
+                    owner_id=client.user_id,
                     website_url="https://example.com/",
                     created_at=base + timedelta(minutes=index),
                 )

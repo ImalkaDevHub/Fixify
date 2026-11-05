@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import (
@@ -52,6 +52,10 @@ class TestRun(Base):
         UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
+    # "manual" (a person pressed Run scan) or "scheduled" (the scan scheduler).
+    trigger: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="manual", server_default="manual"
+    )
     target_url: Mapped[str] = mapped_column(String(2048), nullable=False)
     final_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     max_links: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -75,8 +79,12 @@ class TestRun(Base):
     heartbeat_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Python-side default gives microsecond ordering on every database (runs are ordered by it).
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        server_default=func.now(),
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

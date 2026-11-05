@@ -87,3 +87,35 @@ def cleanup_expired(root: Path, retention_days: int, known_run_ids: set[str] | N
     if removed:
         logger.info("Removed %d expired artifact directories", removed)
     return removed
+
+
+MARKER_FILE = ".fixify-database"
+
+
+def database_identity(database_url: str) -> str:
+    """Stable, credential-free identity of a database (backend, host, port, name)."""
+    import hashlib
+
+    from sqlalchemy.engine import make_url
+
+    url = make_url(database_url)
+    raw = f"{url.get_backend_name()}://{url.host or ''}:{url.port or ''}/{url.database or ''}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:24]
+
+
+def artifact_root_state(root: Path, identity: str) -> str:
+    """Whether this artifact directory belongs to the worker's database.
+
+    Returns "owned" (marker matches), "claimed" (no marker yet: it is written now) or "foreign"
+    (marker names another database). Orphan cleanup must only run for "owned", otherwise a worker
+    pointed at a different database would delete another environment's screenshots.
+    """
+    base = root.resolve()
+    marker = base / MARKER_FILE
+    if not marker.is_file():
+        base.mkdir(parents=True, exist_ok=True)
+        marker.write_text(identity + "\n", encoding="utf-8")
+        return "claimed"
+    if marker.read_text(encoding="utf-8").strip() == identity:
+        return "owned"
+    return "foreign"

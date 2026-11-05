@@ -10,7 +10,8 @@ SLOW_SECONDS = 6
 # ".invalid" is reserved (RFC 2606) and never resolves, so these always fail the same way.
 UNRESOLVABLE = "http://fixify-scanner-test.invalid"
 
-_HEAD = '<meta name="viewport" content="width=device-width"><link rel="icon" href="/icon.png">'
+_ICONS = '<meta name="viewport" content="width=device-width"><link rel="icon" href="/icon.png">'
+_HEAD = _ICONS + '<meta name="description" content="Fixture page">'
 
 
 def _page(title: str, body: str, head: str = _HEAD) -> str:
@@ -26,6 +27,12 @@ def build_routes(blocked_origin: str) -> dict[str, tuple[int, str, str]]:
         "/ok": (200, html, _page("Fixture OK", '<h1>Fine</h1><a href="/ok-target">next</a>')),
         "/ok-target": (200, html, _page("Target", "<h1>Target</h1>")),
         "/icon.png": (200, "image/png", ""),
+        "/pixel.svg": (
+            200,
+            "image/svg+xml",
+            '<svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"><rect width="4" '
+            'height="4"/></svg>',
+        ),
         "/missing": (404, html, _page("Not found", "<h1>Missing</h1>")),
         "/server-error": (500, html, _page("Error", "<h1>Server error</h1>")),
         "/console-error": (
@@ -76,6 +83,18 @@ def build_routes(blocked_origin: str) -> dict[str, tuple[int, str, str]]:
         "/gone": (404, html, _page("Gone", "<h1>Gone</h1>")),
         "/flaky": (503, html, _page("Unavailable", "<h1>Unavailable</h1>")),
         "/no-title": (200, html, _page("", "<p>No heading here.</p>", head="")),
+        "/content-issues": (
+            200,
+            html,
+            _page(
+                "Content",
+                "<h1>One</h1><h1>Two</h1>"
+                '<img src="/pixel.svg" alt="">'  # decorative: fine
+                '<img src="/pixel.svg">'  # no alt attribute
+                '<img src="/missing-image.png" alt="broken">',  # 404: cannot display
+                head=_ICONS,  # no meta description
+            ),
+        ),
     }
 
 

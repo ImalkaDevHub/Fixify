@@ -5,16 +5,26 @@ from datetime import datetime
 from sqlalchemy import Case, Select, case, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.models.project import Project
 from app.db.models.scan import Finding, ScanArtifact, TestCaseResult, TestRun
 
 ACTIVE_STATUSES = ("queued", "running")
 
 
 async def create_run(
-    session: AsyncSession, *, project_id: uuid.UUID, target_url: str, max_links: int
+    session: AsyncSession,
+    *,
+    project_id: uuid.UUID,
+    target_url: str,
+    max_links: int,
+    trigger: str = "manual",
 ) -> TestRun:
     run = TestRun(
-        project_id=project_id, status="queued", target_url=target_url, max_links=max_links
+        project_id=project_id,
+        status="queued",
+        target_url=target_url,
+        max_links=max_links,
+        trigger=trigger,
     )
     session.add(run)
     await session.commit()
@@ -39,14 +49,55 @@ async def list_runs(
     return list(result)
 
 
-async def count_runs(session: AsyncSession) -> int:
-    return (await session.scalar(select(func.count()).select_from(TestRun))) or 0
+def _owned_runs(owner_id: uuid.UUID) -> Select[tuple[TestRun]]:
+    return select(TestRun).join(Project, Project.id == TestRun.project_id).where(
+        Project.owner_id == owner_id
+    )
 
 
-async def count_active(session: AsyncSession, project_id: uuid.UUID | None = None) -> int:
+async def get_owned_run(
+    session: AsyncSession, run_id: uuid.UUID, owner_id: uuid.UUID
+) -> TestRun | None:
+    """The run, only if its project belongs to owner_id."""
+    return await session.scalar(
+        _owned_runs(owner_id).where(TestRun.id == run_id).execution_options(
+            populate_existing=True
+        )
+    )
+
+
+async def get_owned_finding(
+    session: AsyncSession, finding_id: uuid.UUID, owner_id: uuid.UUID
+) -> Finding | None:
+    return await session.scalar(
+        select(Finding)
+        .join(Project, Project.id == Finding.project_id)
+        .where(Finding.id == finding_id, Project.owner_id == owner_id)
+    )
+
+
+async def count_runs(session: AsyncSession, owner_id: uuid.UUID | None = None) -> int:
+    query = select(func.count()).select_from(TestRun)
+    if owner_id is not None:
+        query = query.join(Project, Project.id == TestRun.project_id).where(
+            Project.owner_id == owner_id
+        )
+    return (await session.scalar(query)) or 0
+
+
+async def count_active(
+    session: AsyncSession,
+    project_id: uuid.UUID | None = None,
+    *,
+    owner_id: uuid.UUID | None = None,
+) -> int:
     query = select(func.count()).select_from(TestRun).where(TestRun.status.in_(ACTIVE_STATUSES))
     if project_id is not None:
         query = query.where(TestRun.project_id == project_id)
+    if owner_id is not None:
+        query = query.join(Project, Project.id == TestRun.project_id).where(
+            Project.owner_id == owner_id
+        )
     return (await session.scalar(query)) or 0
 
 
@@ -54,14 +105,22 @@ FINISHED_STATUSES = ("completed", "completed_with_errors")
 
 
 async def latest_runs_for_projects(
-    session: AsyncSession, project_ids: Sequence[uuid.UUID] | None, *, finished_only: bool = False
+    session: AsyncSession,
+    project_ids: Sequence[uuid.UUID] | None,
+    *,
+    finished_only: bool = False,
+    owner_id: uuid.UUID | None = None,
 ) -> dict[uuid.UUID, TestRun]:
-    """Most recent run per project (all projects when project_ids is None)."""
+    """Most recent run per project (all of owner_id's projects when project_ids is None)."""
     if project_ids is not None and not project_ids:
         return {}
     filters = []
     if project_ids is not None:
         filters.append(TestRun.project_id.in_(project_ids))
+    if owner_id is not None:
+        filters.append(
+            TestRun.project_id.in_(select(Project.id).where(Project.owner_id == owner_id))
+        )
     if finished_only:
         filters.append(TestRun.status.in_(FINISHED_STATUSES))
     ranked = (
@@ -176,7 +235,7 @@ def _findings_query(severity: str | None) -> Select[tuple[Finding]]:
     return query
 
 
-def _severity_order() -> Case[int]:
+def severity_order() -> Case[int]:
     return case(
         {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4},
         value=Finding.severity,
@@ -190,7 +249,7 @@ async def list_run_findings(
     result = await session.scalars(
         _findings_query(severity)
         .where(Finding.test_run_id == run_id)
-        .order_by(_severity_order(), Finding.created_at, Finding.id)
+        .order_by(severity_order(), Finding.created_at, Finding.id)
         .limit(limit)
         .offset(offset)
     )
@@ -208,7 +267,7 @@ async def list_project_findings(
     result = await session.scalars(
         _findings_query(severity)
         .where(Finding.project_id == project_id)
-        .order_by(Finding.created_at.desc(), _severity_order(), Finding.id)
+        .order_by(Finding.created_at.desc(), severity_order(), Finding.id)
         .limit(limit)
         .offset(offset)
     )

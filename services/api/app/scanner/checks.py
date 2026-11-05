@@ -18,7 +18,7 @@ from app.scanner.classify import (
     resource_status_severity,
     strip_query,
 )
-from app.scanner.contract import CheckResult, CheckStatus
+from app.scanner.contract import CheckResult, CheckStatus, Severity
 from app.scanner.links import LinkCheck
 from app.scanner.sanitize import MAX_STACK_CHARS, clean_text, redact_url
 
@@ -536,5 +536,236 @@ def check_links(
             "links_checked": len(results),
             "counts": counts,
             "not_confirmed": inconclusive[:50],
+        },
+    )
+
+
+# --- Content, accessibility, and performance indicators -------------------------------------
+
+SLOW_LOAD_LOW_MS = 5_000
+SLOW_LOAD_MEDIUM_MS = 10_000
+_MAX_EXAMPLES = 10
+_ACTIVE_MIXED_TAGS = frozenset({"script", "iframe", "link", "embed", "object"})
+
+
+@dataclass(frozen=True)
+class ImageInfo:
+    src: str
+    has_alt: bool
+    decorative: bool
+    complete: bool
+    natural_width: int
+    lazy: bool
+
+
+@dataclass(frozen=True)
+class InsecureReference:
+    tag: str
+    url: str
+
+
+@dataclass(frozen=True)
+class ContentSnapshot:
+    h1_count: int
+    meta_description: str | None
+    images: list[ImageInfo] = field(default_factory=list)
+    insecure: list[InsecureReference] = field(default_factory=list)
+    load_ms: int | None = None  # load event end, from the Navigation Timing API
+    dom_content_loaded_ms: int | None = None
+
+
+def _non_negative_int(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int | float) or value < 0:
+        return None
+    return int(value)
+
+
+def content_snapshot(raw: dict[str, object]) -> ContentSnapshot:
+    """Parse the untrusted snapshot object returned by page JavaScript, defensively."""
+    images = []
+    raw_images = raw.get("images")
+    for item in raw_images if isinstance(raw_images, list) else []:
+        if isinstance(item, dict) and isinstance(item.get("src"), str):
+            images.append(
+                ImageInfo(
+                    src=item["src"][:2048],
+                    has_alt=bool(item.get("hasAlt")),
+                    decorative=bool(item.get("decorative")),
+                    complete=bool(item.get("complete")),
+                    natural_width=_non_negative_int(item.get("naturalWidth")) or 0,
+                    lazy=bool(item.get("lazy")),
+                )
+            )
+    raw_insecure = raw.get("insecure")
+    insecure = [
+        InsecureReference(tag=str(item["tag"]).lower()[:20], url=item["url"][:2048])
+        for item in (raw_insecure if isinstance(raw_insecure, list) else [])
+        if isinstance(item, dict) and isinstance(item.get("url"), str) and item.get("tag")
+    ]
+    timing = raw.get("timing")
+    timing = timing if isinstance(timing, dict) else {}
+    description = raw.get("metaDescription")
+    return ContentSnapshot(
+        h1_count=_non_negative_int(raw.get("h1Count")) or 0,
+        meta_description=description if isinstance(description, str) else None,
+        images=images[:300],
+        insecure=insecure[:100],
+        load_ms=_non_negative_int(timing.get("load")) or None,
+        dom_content_loaded_ms=_non_negative_int(timing.get("domContentLoaded")) or None,
+    )
+
+
+def _examples(urls: Iterable[str]) -> list[str]:
+    seen: list[str] = []
+    for url in urls:
+        cleaned = redact_url(url) or ""
+        if cleaned and cleaned not in seen:
+            seen.append(cleaned)
+        if len(seen) >= _MAX_EXAMPLES:
+            break
+    return seen
+
+
+def check_content(
+    snapshot: ContentSnapshot,
+    navigation_ms: int,
+    page_url: str,
+    collector: FindingCollector,
+    window: Window,
+) -> CheckResult:
+    check_type = "content_checks"
+    page_key = strip_query(page_url)
+
+    # Broken images: loading finished and there is nothing to show. Lazy images that never
+    # started loading are "not complete" and therefore never judged.
+    broken = [
+        image
+        for image in snapshot.images
+        if image.complete and image.natural_width == 0 and image.src.startswith(("http:", "https:"))
+    ]
+    for image in broken[:50]:
+        collector.add(
+            key=(strip_query(image.src),),
+            check_type=check_type,
+            finding_type="broken_image",
+            title="Image failed to display",
+            description="The browser finished loading this image but could not display it "
+            "(missing file, wrong content type, or a corrupt image).",
+            severity="medium" if is_first_party(image.src, page_url) else "low",
+            affected_url=image.src,
+            evidence={"page_url": redact_url(page_url), "lazy": image.lazy},
+        )
+
+    missing_alt = [image for image in snapshot.images if not image.has_alt and not image.decorative]
+    if missing_alt:
+        collector.add(
+            key=(page_key,),
+            check_type=check_type,
+            finding_type="missing_alt_text",
+            title=f"{len(missing_alt)} image(s) without alternative text",
+            description="Images without an alt attribute are announced poorly by screen "
+            'readers. Add a short description, or alt="" for purely decorative images.',
+            severity="low",
+            affected_url=page_url,
+            evidence={"count": len(missing_alt), "examples": _examples(i.src for i in missing_alt)},
+        )
+
+    if snapshot.h1_count > 1:
+        collector.add(
+            key=(page_key,),
+            check_type=check_type,
+            finding_type="multiple_h1",
+            title=f"{snapshot.h1_count} top-level headings (<h1>) on one page",
+            description="Several <h1> elements make the page outline ambiguous for assistive "
+            "technology and search engines. Usually one <h1> describes the page.",
+            severity="info",
+            affected_url=page_url,
+            evidence={"h1_count": snapshot.h1_count},
+        )
+
+    if not (snapshot.meta_description or "").strip():
+        collector.add(
+            key=(page_key,),
+            check_type=check_type,
+            finding_type="missing_meta_description",
+            title="No meta description",
+            description='The page has no non-empty <meta name="description">, so search '
+            "engines and link previews pick an excerpt themselves.",
+            severity="info",
+            affected_url=page_url,
+        )
+
+    active = [ref for ref in snapshot.insecure if ref.tag in _ACTIVE_MIXED_TAGS]
+    passive = [ref for ref in snapshot.insecure if ref.tag not in _ACTIVE_MIXED_TAGS]
+    mixed: list[tuple[str, list[InsecureReference], Severity]] = [
+        ("active", active, "high"),
+        ("passive", passive, "low"),
+    ]
+    for kind, refs, severity in mixed:
+        if not refs:
+            continue
+        collector.add(
+            key=(page_key, kind),
+            check_type=check_type,
+            finding_type=f"mixed_content_{kind}",
+            title=f"HTTPS page loads {len(refs)} {kind} resource(s) over plain HTTP",
+            description=(
+                "Browsers block insecure scripts, stylesheets, and frames on HTTPS pages, so "
+                "these resources do not load."
+                if kind == "active"
+                else "Insecure images or media on an HTTPS page are upgraded or flagged by "
+                "browsers and can be modified in transit."
+            ),
+            severity=severity,
+            affected_url=page_url,
+            evidence={
+                "count": len(refs),
+                "elements": sorted({ref.tag for ref in refs}),
+                "examples": _examples(ref.url for ref in refs),
+            },
+        )
+
+    load_ms = snapshot.load_ms or navigation_ms
+    if load_ms >= SLOW_LOAD_LOW_MS:
+        collector.add(
+            key=(page_key,),
+            check_type=check_type,
+            finding_type="slow_page_load",
+            title=f"Page took {load_ms / 1000:.1f} s to load",
+            description="Measured once from the Fixify scanner; network conditions vary, so this "
+            "is an indicator, not a performance audit. Large scripts, images, or slow server "
+            "responses are common causes.",
+            severity="medium" if load_ms >= SLOW_LOAD_MEDIUM_MS else "low",
+            confidence="suspected",
+            affected_url=page_url,
+            evidence={
+                "load_ms": load_ms,
+                "dom_content_loaded_ms": snapshot.dom_content_loaded_ms,
+                "navigation_ms": navigation_ms,
+                "threshold_ms": SLOW_LOAD_LOW_MS,
+            },
+        )
+
+    findings = collector.for_check(check_type)
+    return _result(
+        name="Content, accessibility & performance",
+        check_type=check_type,
+        status=_status_from(collector, check_type),
+        target_url=page_url,
+        summary=(
+            f"{len(findings)} content issue(s)."
+            if findings
+            else "Images, headings, metadata, transport security, and load time look fine."
+        ),
+        window=window,
+        details={
+            "images_checked": len(snapshot.images),
+            "broken_images": len(broken),
+            "images_missing_alt": len(missing_alt),
+            "h1_count": snapshot.h1_count,
+            "has_meta_description": bool((snapshot.meta_description or "").strip()),
+            "insecure_references": len(snapshot.insecure),
+            "load_ms": load_ms,
+            "note": "Indicators only; not a full accessibility, SEO, or performance audit.",
         },
     )

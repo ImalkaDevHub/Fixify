@@ -1,7 +1,7 @@
-.PHONY: api worker web test lint typecheck
+.PHONY: api worker web test web-test lint typecheck migrate
 
 api:
-	cd services/api && uvicorn app.main:app --reload
+	cd services/api && python -m app.serve
 
 worker:
 	cd services/api && python -m app.worker
@@ -9,11 +9,17 @@ worker:
 web:
 	cd apps/web && npm run dev
 
+migrate:
+	cd services/api && alembic upgrade head
+
 test:
 	cd services/api && pytest
 
+web-test:
+	cd apps/web && npm test
+
 lint:
-	cd apps/web && npm run lint
+	cd services/api && ruff check . && cd ../../apps/web && npm run lint
 
 typecheck:
 	cd apps/web && npm run typecheck
