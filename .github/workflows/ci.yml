@@ -431,7 +431,7 @@ jobs:
         run: actionlint .github/workflows/ci.yml
 
       - name: Scan repository history for secrets
-        run: gitleaks git --redact --exit-code 1 --no-banner
+        run: gitleaks git --redact --verbose --exit-code 1 --no-banner
 
       - name: Audit GitHub Actions security
         uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # zizmor-action v0.8.1

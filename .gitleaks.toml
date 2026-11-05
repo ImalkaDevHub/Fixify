@@ -1,0 +1,11 @@
+title = "Fixify Gitleaks configuration"
+
+[extend]
+useDefault = true
+
+# Fake credentials used only as test fixtures for the secret-redaction code.
+# Keep this list to exact, obviously fake values so real secrets still fail the scan.
+[[allowlists]]
+description = "Fake AWS access key in the redaction test fixture"
+regexTarget = "match"
+regexes = ['''^AKIAABCDEFGHIJKLMNOP$''']
