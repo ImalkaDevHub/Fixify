@@ -71,7 +71,10 @@ async def test_scans_findings_and_artifacts_are_isolated(
 
     summary = (await other_client.get("/api/v1/scans/summary")).json()
     assert summary == {
-        "project_count": 0, "scan_count": 0, "active_scan_count": 0, "latest_findings_count": 0
+        "project_count": 0,
+        "scan_count": 0,
+        "active_scan_count": 0,
+        "latest_findings_count": 0,
     }
     assert (await client.get("/api/v1/scans/summary")).json()["scan_count"] == 1
 
@@ -92,7 +95,9 @@ async def test_project_update(client):
     assert response.status_code == 200, response.text
     body = response.json()
     assert (body["name"], body["repo_full_name"], body["default_branch"]) == (
-        "Renamed", "octo/site", "main"
+        "Renamed",
+        "octo/site",
+        "main",
     )
     cleared = await client.patch(f"/api/v1/projects/{project_id}", json={"repo_full_name": ""})
     assert cleared.json()["repo_full_name"] is None
@@ -147,3 +152,44 @@ async def test_unscoped_lookup_is_only_for_workers(session_factory, client):
     async with session_factory() as session:
         assert await project_repository.get_project(session, project_id, uuid.uuid4()) is None
         assert await project_repository.get_project_unscoped(session, project_id) is not None
+
+
+async def test_every_project_scoped_endpoint_rejects_another_user(
+    client, other_client, session_factory, artifact_dir, tmp_path
+):
+    """Sweep: user B gets 404 (never data, never a side effect) for user A's project."""
+    project_id, run_id = await _completed_scan(client, session_factory, artifact_dir, tmp_path)
+    schedule = {"frequency": "weekly", "weekday": 2, "hour_utc": 4}
+    assert (
+        await client.put(f"/api/v1/projects/{project_id}/schedule", json=schedule)
+    ).status_code == 200
+    empty_overview = (await other_client.get("/api/v1/analytics/overview")).json()
+
+    attempts = [
+        ("get", f"/api/v1/projects/{project_id}/verification", None),
+        ("post", f"/api/v1/projects/{project_id}/verification/check", None),
+        ("get", f"/api/v1/projects/{project_id}/schedule", None),
+        ("put", f"/api/v1/projects/{project_id}/schedule", schedule),
+        ("delete", f"/api/v1/projects/{project_id}/schedule", None),
+        (
+            "put",
+            f"/api/v1/projects/{project_id}/repository",
+            {"repo_full_name": "victim/repo", "branch": "main"},
+        ),
+        ("delete", f"/api/v1/projects/{project_id}/repository", None),
+        ("get", f"/api/v1/projects/{project_id}/repository/tree", None),
+        ("post", f"/api/v1/scans/{run_id}/cancel", None),
+    ]
+    for method, path, body in attempts:
+        response = await getattr(other_client, method)(path, **({"json": body} if body else {}))
+        assert response.status_code == 404, f"{method.upper()} {path} -> {response.status_code}"
+
+    # The owner's schedule survived B's PUT/DELETE, and B's analytics never include A's data.
+    assert (await client.get(f"/api/v1/projects/{project_id}/schedule")).json()["frequency"] == (
+        "weekly"
+    )
+    overview = (await other_client.get("/api/v1/analytics/overview")).json()
+    assert overview["project_count"] == overview["scan_count"] == 0
+    assert overview == empty_overview
+    mine = (await client.get("/api/v1/analytics/overview")).json()
+    assert mine["project_count"] == 1 and mine["scan_count"] == 1

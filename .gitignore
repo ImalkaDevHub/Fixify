@@ -33,3 +33,7 @@ test-results/
 # Local launcher (fixify.ps1 / fixify.sh): process state and service logs
 /runtime/
 /logs/
+
+# Local database backups/exports (may contain personal data)
+/backups/
+/services/api/.artifacts-local/

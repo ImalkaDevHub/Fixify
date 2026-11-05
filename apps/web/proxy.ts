@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { buildCsp, newNonce } from "./lib/csp";
 
 // Optimistic routing only. The `fixify_session` cookie carries no credential; every API call is
 // authorized by FastAPI, so a forged cookie only reaches pages that then show "signed out".
@@ -20,7 +21,17 @@ export function proxy(request: NextRequest) {
     url.search = "";
     return NextResponse.redirect(url);
   }
-  return NextResponse.next();
+
+  // Per-request nonce: Next.js reads it from the request's CSP header while rendering and adds
+  // it to every framework script (pages are rendered per request; see app/layout.tsx).
+  const nonce = newNonce();
+  const csp = buildCsp(nonce, process.env.NODE_ENV === "development");
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-nonce", nonce);
+  requestHeaders.set("Content-Security-Policy", csp);
+  const response = NextResponse.next({ request: { headers: requestHeaders } });
+  response.headers.set("Content-Security-Policy", csp);
+  return response;
 }
 
 export const config = {

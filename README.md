@@ -54,9 +54,9 @@ Prerequisites:
 |---|---|---|
 | Python | 3.12+ | for the API and worker (virtual environment in `services/api/.venv`) |
 | Node.js / npm | 20.9+ | for the web app |
-| PostgreSQL | yes | Docker Desktop (the launcher starts it), a native install, or a hosted database such as Supabase |
-| Docker + Compose | optional | only if PostgreSQL or Redis should run locally in containers |
-| Redis | optional | not needed with `QUEUE_BACKEND=database` and `REDIS_REQUIRED=false` |
+| PostgreSQL 17 | yes | self-managed: the Docker Compose service (the launcher starts it) or a native install |
+| Docker + Compose | recommended | runs PostgreSQL and Redis (`infra/docker-compose.yml`) |
+| Redis 7 | default | the scan queue; `QUEUE_BACKEND=database` is a fallback without Redis |
 
 ### 1. One-time setup
 
@@ -82,7 +82,7 @@ cp .env.example .env                 # then edit DATABASE_URL (and optional AI /
 chmod +x fixify.sh
 ```
 
-Without Redis, set `QUEUE_BACKEND=database` and `REDIS_REQUIRED=false` in `.env`. The web app needs no `.env.local`: the launcher points it at the API automatically.
+In `.env`, replace `POSTGRES_PASSWORD` (and the same password in `DATABASE_URL`) before the first start. If a native PostgreSQL already uses port 5432, set `POSTGRES_HOST_PORT=5433` and use port 5433 in `DATABASE_URL`. Database details, including importing data from an earlier database: [docs/development-setup.md](docs/development-setup.md). The web app needs no `.env.local`: the launcher points it at the API automatically.
 
 ### 2. Start everything with one command
 
@@ -103,7 +103,7 @@ Open <http://localhost:3000>, create an account, and verify the email. With `EMA
 ### Running the services by hand (alternative)
 
 ```powershell
-docker compose --env-file .env -f infra/docker-compose.yml up -d   # skip with native or hosted PostgreSQL
+docker compose --env-file .env -f infra/docker-compose.yml up -d postgres redis
 cd services/api
 .\.venv\Scripts\Activate.ps1
 alembic upgrade head
@@ -154,7 +154,7 @@ Exit codes: `0` success, `1` a check or service failed, `2` usage error, `130` i
 
 1. **Environment:** `.env`, the API virtual environment and `apps/web/node_modules` must exist. Required settings are checked, and optional ones (AI, GitHub) are reported as disabled. Only "configured" or "not set" is shown, never a value. The settings are loaded with the API's own configuration class, so validation errors match what the API would report.
 2. **Tools:** Node.js 20.9+, npm, and Python 3.12+ in the virtual environment.
-3. **Infrastructure:** a Compose container is started only when `DATABASE_URL` / `REDIS_URL` point at `localhost` on the published port (5432 / 6379) and nothing is already serving there. A hosted database such as Supabase, `QUEUE_BACKEND=database`, or a native PostgreSQL needs no Docker. The launcher waits for the containers' health checks.
+3. **Infrastructure:** a Compose container is started only when `DATABASE_URL` / `REDIS_URL` point at `localhost` on the published port (`POSTGRES_HOST_PORT` / `REDIS_HOST_PORT`, default 5432 / 6379) and nothing is already serving there. A native PostgreSQL, or `QUEUE_BACKEND=database`, needs no container. The launcher waits for the containers' health checks.
 4. **Connectivity:** connects to PostgreSQL (`SELECT version()`) and pings Redis if the configuration uses it, with up to three attempts.
 5. **Migrations:** compares the database revision with the Alembic head, read-only. If migrations are pending, it asks before applying them; with `--migrate` or `FIXIFY_AUTO_MIGRATE=1` it applies them without asking. Without a terminal and without either option, it stops and tells you to run `migrate`. It never starts the app on an outdated schema.
 6. **API:** `python -m app.serve`. Ready when `GET /api/v1/health/ready` returns 200.
@@ -178,7 +178,7 @@ If a step fails, the launcher names the failing service, shows the last log line
 |---|---|
 | `.env missing` | `Copy-Item .env.example .env` (Windows) or `cp .env.example .env`, then set `DATABASE_URL`. |
 | `services/api/.venv missing` / `apps/web/node_modules missing` | Run the [one-time setup](#1-one-time-setup). |
-| `PostgreSQL at … is unreachable: failed to resolve host 'db.<ref>.supabase.co'` | Supabase's direct host is IPv6-only. On an IPv4-only network, use the **Session pooler** connection string from Supabase: **Connect → Session pooler**, user `postgres.<ref>`, port 5432. |
+| `password authentication failed` | The data volume was created with another `POSTGRES_PASSWORD`. Change the password with `ALTER USER`; never delete the volume (see [development-setup](docs/development-setup.md#database)). |
 | `Docker is needed for local postgres, but the Docker daemon is not running` | Start Docker Desktop, or point `DATABASE_URL` at a running or hosted PostgreSQL. |
 | `port 5432 is already used by another process` | A native PostgreSQL is running. Point `DATABASE_URL` at it, or stop it before using the container. |
 | `port 3000 is already in use … node.exe` / `Another next dev server is already running` | A manually started `npm run dev` is still running. Stop it (Ctrl+C in its terminal). Next.js allows one dev server per project folder. |
@@ -205,9 +205,23 @@ Every setting, with its default and bounds, is in [services/api/.env.example](se
 ```powershell
 cd services/api; .\.venv\Scripts\Activate.ps1; pytest; ruff check .; alembic check
 cd apps/web; npm run lint; npm run typecheck; npm test; npm run build
+services\api\.venv\Scripts\python.exe -m unittest discover -s scripts/launcher/tests   # from the root
 ```
 
-See [docs/testing.md](docs/testing.md) for what each suite covers, and [docs/deployment.md](docs/deployment.md) before deploying anywhere shared.
+See [docs/testing.md](docs/testing.md) for what each suite covers (including the PostgreSQL migration test and the browser end-to-end run), and [docs/deployment.md](docs/deployment.md) before deploying anywhere shared.
+
+## Docker images
+
+| Image | Dockerfile | Notes |
+|---|---|---|
+| API | `services/api/Dockerfile` | `python:3.12-slim`, non-root (`fixify`), health check on `/api/v1/health` |
+| Worker | `services/api/Dockerfile.worker` | Playwright base image with Chromium, non-root (`pwuser`); no published ports |
+| Web | `apps/web/Dockerfile` | multi-stage `node:22-alpine`, non-root (`node`), health check on `/login` |
+| Migrations | Compose service `migrate` | one-shot `alembic upgrade head`; the API and worker start only after it succeeds |
+
+The full container stack: `docker compose --env-file .env -f infra/docker-compose.yml --profile app --profile worker up -d --build`. No secrets are copied into images (`.dockerignore` excludes `.env*`); configuration comes from the environment.
+
+> Behind a TLS-inspecting firewall (for example a Fortinet or Zscaler proxy), `npm ci` and `pip install` inside the build fail with `unable to verify the first certificate`. Do not disable TLS verification. Build on a network without inspection, or add the organisation's root CA to the build environment.
 
 ## Documentation
 

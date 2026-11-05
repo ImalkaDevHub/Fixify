@@ -17,4 +17,6 @@ COPY --from=build /app/.next ./.next
 COPY --from=build /app/next.config.ts ./next.config.ts
 USER node
 EXPOSE 3000
+HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \
+    CMD ["node", "-e", "fetch('http://127.0.0.1:3000/login').then(r => process.exit(r.status < 500 ? 0 : 1)).catch(() => process.exit(1))"]
 CMD ["npx", "next", "start", "-H", "0.0.0.0", "-p", "3000"]

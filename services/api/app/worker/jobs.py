@@ -40,6 +40,9 @@ LABELS = {
 HEARTBEAT_SECONDS = 15
 STALE_AFTER_SECONDS = 180
 POLL_SECONDS = 2
+# While the database is unreachable: wait 2 s, 4 s, ... up to 30 s between attempts.
+OUTAGE_BACKOFF_START_SECONDS = 2
+OUTAGE_BACKOFF_MAX_SECONDS = 30
 
 
 def _now() -> datetime:
@@ -67,13 +70,25 @@ class JobWorker:
     async def run_forever(self) -> None:
         logger.info("Job worker started (concurrency=%d)", self.settings.job_concurrency)
         last_sweep = 0.0
+        backoff = OUTAGE_BACKOFF_START_SECONDS
         try:
             while not self._stopping:
                 loop_time = asyncio.get_running_loop().time()
                 if loop_time - last_sweep >= 30:
                     await self.recover_stale()
                     last_sweep = loop_time
-                started = await self.start_due()
+                try:
+                    started = await self.start_due()
+                except Exception as error:  # noqa: BLE001 - a database outage must not end the worker
+                    logger.warning(
+                        "Job polling failed (%s); retrying in %d s",
+                        type(error).__name__,
+                        backoff,
+                    )
+                    await asyncio.sleep(backoff)
+                    backoff = min(backoff * 2, OUTAGE_BACKOFF_MAX_SECONDS)
+                    continue
+                backoff = OUTAGE_BACKOFF_START_SECONDS
                 if not started:
                     await asyncio.sleep(POLL_SECONDS)
         finally:

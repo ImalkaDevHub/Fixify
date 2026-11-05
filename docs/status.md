@@ -1,83 +1,91 @@
 # Fixify status
 
-**Overall: COMPLETE WITH LIMITATIONS.** Every workflow step, from registration through to the pull request, was verified in a real browser. The scan path ran against the real Supabase database. The AI and GitHub steps ran against a mock AI provider and a fake GitHub API, because no real credentials were available. The remaining limitations are listed below.
+**Overall: LOCAL DEVELOPMENT READY. Not production ready.** The architecture matches the intended design. Every workflow step is implemented and covered by automated tests. The open items are listed under [Remaining work](#remaining-work).
 
-Verified on 2026-11-05.
+Audit and verification: 2026-11-05.
 
-## Verification
+## Architecture
 
-| Check | Result |
-|---|---|
-| Backend `pytest` | **298 passed**, 2 skipped (opt-in: destructive migration test, browser E2E) |
-| `ruff check .` | passed |
-| `alembic upgrade head` on PostgreSQL 17 (Supabase dev database) | 0001 → 0005 applied |
-| `alembic check` (models vs migrations, PostgreSQL) | no drift |
-| Frontend `eslint`, `tsc --noEmit`, `npm test` (8), `next build` | all passed |
-| Real browser, against the Supabase database | Register (including a server validation error), console email link, verify email, dashboard onboarding, create project, run a real scan of example.com (9/9 checks, 2 accurate info findings, 6.5 s), live status, report, authenticated screenshot, finding page, honest "AI not configured" and "GitHub not configured" states, notification, analytics, mobile 375 px (no horizontal overflow on any main page), sign out, protected-route redirect |
-| AI analysis, GitHub OAuth, fix generation, review, approval, branch, commit, pull request | **Verified in a real browser with the E2E harness** (`tests/e2e/stack.py`: mock AI, fake GitHub, throwaway SQLite), both by hand and with the automated Playwright test `tests/e2e/test_workflow.py` (passed twice, about 19 s). Also covered by backend tests. **Not yet run against real Claude or GitHub.** |
-| Docker images (`api`, `web`, `worker`) | **Not built**: the Docker daemon was not running |
+| Layer | Intended | Actual | Status |
+|---|---|---|---|
+| Frontend | Next.js App Router + TypeScript | Next.js 16.4 App Router, TypeScript, same-origin `/api/v1/*` rewrite | ✔ |
+| API | FastAPI | FastAPI; enqueues scans and never runs a browser (Playwright is imported only by the scanner) | ✔ |
+| Database | Self-managed PostgreSQL | PostgreSQL 17 (Docker Compose) or native; SQLAlchemy 2 (async, psycopg 3); Alembic `0001`→`0005` | ✔ |
+| Queue | Redis | Redis 7 (default `QUEUE_BACKEND=redis`); PostgreSQL stays the source of truth (atomic claims, database sweep) | ✔ |
+| Worker | Separate Python worker | `python -m app.worker`: scans in an isolated scanner subprocess (Playwright + Chromium, egress proxy), AI and GitHub jobs, scheduler | ✔ |
+| AI | Anthropic Claude | Official `anthropic` SDK, structured JSON output | ✔ (mock-verified) |
+| GitHub | OAuth + REST API | OAuth App, Git Data API, pull requests | ✔ (fake-verified) |
+| Local infra | Docker Compose: PostgreSQL + Redis | `infra/docker-compose.yml`: health checks, persistent volumes, `127.0.0.1` binding, configurable host ports | ✔ |
+| Supabase | Not a dependency | **No Supabase code, client, Auth or Storage.** The only dependency was a development `DATABASE_URL`; it now points at the local database | ✔ removed |
 
-## Implemented
+## Feature checklist
 
-**Authentication.** Argon2id; JWT access cookie with a per-request session check; rotating refresh token with reuse detection; session-bound CSRF and Origin checks; email verification; password reset and change; session management; account deletion; rate limits; production settings guard.
+Status: **CV** complete and verified (automated tests, plus a real run where noted) · **IV** implemented, verified only with mocks or fakes · **P** partial · **M** missing · **B** broken (fixed in this audit unless noted).
 
-**Ownership.** `projects.owner_id`, with every query scoped by owner. Other users' objects return 404. Pre-auth projects are kept hidden, and `app.cli assign-orphans` assigns them.
+| Area | Feature | Status | Evidence |
+|---|---|---|---|
+| Auth | Registration, email verification, login/logout, Argon2id hashing | CV | `test_auth.py` |
+| Auth | Access JWT + DB-checked session, rotating refresh with reuse detection, CSRF + Origin, expiry | CV | `test_auth.py` |
+| Auth | Password reset/change, sessions list/revoke, account deletion | CV | `test_auth.py` |
+| Auth | Login throttling (per IP and per account, Redis-shared) | CV | `test_auth.py` |
+| Auth | 2FA | M | documented gap |
+| Isolation | Projects, scans, findings, artifacts, comparison, notifications, analytics, schedules, repository, verification, fixes, jobs, sessions | CV | `test_ownership.py` (new sweep over every project-scoped endpoint), `test_ai_github_fixes.py`, `test_platform_units.py` |
+| Projects | Create, list, search, detail, update, delete, limits | CV | `test_projects.py`, `test_ownership.py` |
+| Scans | Start (enqueue), history, detail, compare, cancel, duplicate prevention, capacity limits | CV | `test_scans_api.py` |
+| Scanner | Navigation/status, redirects, timeouts, console errors, exceptions, failed requests, 4xx/5xx, links (confirmed vs. "may be broken"), title, H1, viewport, favicon, images, alt text, meta description, mixed content, slow load, screenshot | CV | `test_scanner_engine.py` (real Chromium, local fixture site), `test_scanner_rules.py`, `test_content_checks.py` |
+| Scanner | SSRF: URL policy, DNS pinning, egress proxy, private-network block | CV | `test_url_policy.py`, `test_site_verification.py` |
+| Worker | Atomic claim, heartbeats, retries, stale recovery, idempotent persistence, artifact cleanup safety | CV | `test_worker.py` |
+| Worker | Survives a database outage (scan and job loops) | **B → fixed** | a DB error escaped `run_forever` and stopped the whole process; now logged and retried with backoff (`test_worker.py`) |
+| Worker | Graceful shutdown on SIGTERM / Ctrl+Break | **P → fixed** | only SIGINT reached `shutdown()`; now all three do, so in-flight scans are re-queued at once (`test_worker.py`) |
+| Scheduler | Daily / weekly / every N h (≥ 6), UTC, duplicate-safe claiming | CV | `test_platform_units.py` |
+| AI | Analysis, structured output, redaction, untrusted-content boundary, retries/timeouts, per-user hourly limit, `max_tokens` | IV | mock provider; real Claude not run |
+| AI | Dependency declared | **B → fixed** | `anthropic` was imported but missing from `pyproject.toml`; a fresh install or image would crash the worker |
+| Fixes | Generation, exact-match edits, review, approve/reject, regenerate, reopen | IV | `test_ai_github_fixes.py` |
+| Fixes | JavaScript / TypeScript / CSS validation | **P → fixed** | bracket balance only; now real tree-sitter parsers (JS/JSX, TS, TSX, CSS), comparative, parse-only |
+| GitHub | OAuth with bound state, Fernet-encrypted tokens, revocation, repository/branch checks, push-permission check, PR creation, never merges | IV | fake GitHub; real GitHub not run |
+| Notifications | All event types, unread count, read/read-all, preferences | CV | `test_platform_units.py` |
+| Analytics | Totals, severity, new vs. resolved, duration, health, per-day series; no N+1 | CV | `test_platform_units.py` |
+| Web | All pages, auth redirects, loading/empty/error states, no placeholder features | CV | build; browser checks |
+| Web | Content Security Policy | **P → fixed** | `'unsafe-inline'` scripts; now nonce + `'strict-dynamic'` (verified in a browser: all 19 scripts carry the nonce, no violations, hydration works) |
+| Web | App icon | **M → fixed** | `app/icon.svg` (Fixify's own scanner flagged its absence) |
+| Launcher | start/stop/restart/status/logs/migrate/infra/open/help, PID safety, rollback, Ctrl+C | CV | 24 launcher tests; real runs |
+| Launcher | Configurable Compose host ports | **M → fixed** | `POSTGRES_HOST_PORT` / `REDIS_HOST_PORT` |
+| Docker | Migrations in the container stack | **M → fixed** | one-shot `migrate` service; API and worker wait for it |
+| Docker | Image health checks | **M → fixed** | API (`/health`) and web |
 
-**Projects.** Create, edit, delete, search; description; links per scan; repository and branch; schedule; latest scan; history.
+## Test results
 
-**Scanner.** All existing checks, plus content, accessibility, and performance indicators: broken images, alt text, multiple `<h1>`, meta description, active and passive mixed content, slow load (suspected).
+All run on 2026-11-05 on Windows 11 (Python 3.14.7, Node.js 24.20.0, Docker 29.8.0).
 
-**AI analysis.** Provider abstraction on the official Anthropic SDK with structured JSON output, effort, refusal fallback, timeouts, and retries. Untrusted-content boundary, secret redaction, output filtering. Honest unavailable state.
+| Check | Command | Result |
+|---|---|---|
+| Backend tests | `pytest` (services/api) | **311 passed**, 2 skipped (the opt-ins below, run separately) |
+| Backend lint | `ruff check .` | passed |
+| Launcher tests | `python -m unittest discover -s scripts/launcher/tests` | **24 passed** |
+| Frontend | `npm run lint`, `npm run typecheck`, `npm test`, `npm run build` | passed; **11** tests; every route rendered per request (nonce CSP) |
+| Infrastructure | `.\fixify.ps1 infra` | PostgreSQL 17.11 (`127.0.0.1:5433`) and Redis 7.4.12 (`127.0.0.1:6379`) containers healthy; persistent volumes |
+| Migrations on a clean database | `.\fixify.ps1 migrate --yes` | `0001` → `0005` applied to the empty `fixify` database |
+| Model drift | `alembic check` | no new operations |
+| Migration round trip | `TEST_DATABASE_URL=… pytest tests/test_migrations.py` | **passed** (upgrade, drift check, downgrade to empty) on `fixify_migration_test` |
+| Browser E2E, PostgreSQL + Redis | `tests.e2e.stack --database-url …/fixify_e2e_test --redis-url …` + `pytest tests/e2e/test_workflow.py` | **passed** (29 s): register → verify → project → scan of the local fixture site through the Redis queue → 5 findings + screenshot stored in PostgreSQL → AI analysis (mock) → GitHub connect (fake) → fix → review → approve → pull request |
+| Browser E2E, SQLite + Redis | same, without `--database-url` | passed (30 s) |
+| CSP in a browser | production build, `/login` | all 19 scripts carry the nonce, no console violations, React hydrated (client-side validation works) |
+| Launcher start on the real stack | `.\fixify.ps1 start` | API ready (`/health/ready`: database and Redis), worker started; web step refused because a manually started `next dev` held port 3000, and the run rolled back cleanly. **A complete start including the web app is not verified on this machine** |
+| Worker shutdown (Windows) | `.\fixify.ps1 stop` | `Received SIGBREAK; shutting down` → `Worker stopped`, exit code 0 (was killed with `0xC000013A` before the fix) |
+| API image | `docker build services/api` | **built** (589 MB) and run on the Compose network: Docker health check `healthy`, `/health/ready` ready (PostgreSQL + Redis), runs as `fixify` (non-root), no `.env` in the image, `alembic upgrade head` works with `--read-only` (the `migrate` service) |
+| Web image | `docker build apps/web` | **not built**: `npm ci` fails inside the build (see below) |
+| Worker image | `docker build -f Dockerfile.worker` | **not attempted**: about 2 GB Playwright base image over this network |
 
-**GitHub.** OAuth with bound state, Fernet-encrypted tokens, repository and branch selection checked with GitHub, revoked-token detection, disconnect with grant revocation, allow-listed file access.
+**Why the web image did not build here.** This network's firewall (Fortinet) re-signs TLS for `registry.npmjs.org`. Inside containers that certificate is untrusted, so `npm ci` fails (`unable to verify the first certificate`, reproduced twice; `npm view` in a plain `node:22-alpine` container fails the same way). PyPI is not intercepted, which is why the API image built. TLS verification was not disabled. Image downloads from Docker Hub were very slow, and stalled several times.
 
-**Fixes.** Generation from real files; exact-match edit validation; syntax checks; statuses (pending review, approved, rejected, applied, failed validation, superseded); history; regenerate with feedback; reopen; reviews and comments.
+## Remaining work
 
-**Pull requests.** Approval required; edits re-applied against the current branch head; new `fixify/…` branch; idempotent retries; status refresh; never merged.
-
-**Background jobs.** The worker runs scans, AI and GitHub jobs, and the scheduler, with claims, heartbeats, retries with backoff, stale recovery, and visible errors.
-
-**Notifications.** Scan started (off by default), completed, failed, critical findings, analysis complete, fix ready, validation failed, pull request created, job failed. Unread count, mark read, mark all, preferences.
-
-**Schedules.** Daily, weekly, or every N hours (minimum 6). Duplicate-safe claiming; respects verification and limits; records the outcome.
-
-**Analytics.** Totals, severity, new versus resolved, duration, health score, and per-day series, from persisted data only, with empty states.
-
-**UI.** Dark design system with the requested palette (Inter and JetBrains Mono); landing page; collapsible sidebar and mobile drawer; breadcrumbs; notification bell; every page listed in the request; Recharts charts; side-by-side and unified syntax-highlighted diff review; Motion animations respecting `prefers-reduced-motion`; skeletons and empty states.
-
-## Added in the final pass
-
-- **Website ownership verification:** a meta tag or `/.well-known` file, checked through the egress proxy, bound to the hostname, and required by default in production. Migration `0005`.
-- **Safer screenshot cleanup:** the artifact directory records its database, so a worker pointed at another database no longer deletes that environment's screenshots.
-- **Analytics without N+1 queries:** baselines come from two queries in total, whatever the number of projects.
-- **Timestamps without a zone are read as UTC** in the UI.
-- **Mock-AI / fake-GitHub E2E harness**, plus an automated browser workflow test.
-
-## Needs external credentials
-
-| Feature | Settings |
-|---|---|
-| AI analysis and fix generation | `ANTHROPIC_API_KEY` (optionally `AI_MODEL`, `AI_EFFORT`) |
-| GitHub connection, repositories, pull requests | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `TOKEN_ENCRYPTION_KEY` (OAuth app callback `…/github/callback`) |
-| Real verification and reset emails | `EMAIL_BACKEND=smtp`, `SMTP_*` |
+1. **Real-credential runs:** Claude (`ANTHROPIC_API_KEY`) and a GitHub OAuth app. These flows are verified only with the mock provider and the fake GitHub API.
+2. **Production blockers** (details in [security.md](security.md#known-gaps)): network-isolated scanner without database credentials; DNS TXT site verification; 2FA (recommended); a GitHub App instead of the OAuth `repo` scope (recommended).
+3. **Web and worker images** still need to be built and run on a network without TLS inspection. A CI runner will do this in the next phase.
+4. **One complete `.\fixify.ps1 start` including the web app** on this machine: run it once while no manual `next dev` holds port 3000. The web step itself is covered by the launcher tests, and earlier runs started the API and worker.
+5. **Production email (SMTP)** is configured but untested; development uses the console backend.
 
 ## Database changes
 
-- `0003_auth`: `users`, `user_sessions`, `user_tokens`, and `projects.owner_id`.
-- `0004_platform`: `background_jobs`, `ai_analyses`, `github_connections`, `fix_proposals`, `fix_reviews`, `pull_requests`, `notifications`, `user_preferences`, `scan_schedules`, `projects.description`, `projects.scan_max_links`, and `test_runs.trigger`.
-
-Both are additive; no existing table or row is removed. See [api.md](api.md) for every new endpoint.
-
-## Known limitations and production blockers
-
-1. **Real-credential run still to do.** The AI, OAuth, fix, and pull-request flows work against the mock and fake, but have not been run against Claude and GitHub.
-2. **Browser isolation is in-process** (egress proxy and launch flags), and the worker holds database credentials. Production needs a network-isolated scanner (see [security.md](security.md)).
-3. **Ownership verification proves control of one page, not authorization.** No DNS TXT method, and it is optional outside production.
-4. **Rate limits are per process without Redis.**
-5. **The CSP allows inline scripts.** Nonce-based CSP not implemented.
-6. **The OAuth App `repo` scope is broad.** A GitHub App would be more granular.
-7. **No 2FA or account lockout.**
-8. **Syntax validation is basic for JS, TS, and CSS** (bracket balance, not a full parser). Fixes are never executed or tested by Fixify; repository CI must run on the pull request.
-9. **Docker images not built or verified** in this environment.
-10. **Fixed: switching the worker's database no longer deletes screenshots.** Before the fix, the first worker start against the new Supabase database removed 2 old screenshot folders from earlier local scans. Those cannot be recovered.
-11. **Remote database latency.** Each page load makes several round trips, which is noticeable over a hosted database far from the API.
+None in this audit. `0003_auth`, `0004_platform` and `0005_site_verification` are additive. Data from the earlier hosted development database was exported read-only (`backups/`, git-ignored) and was **not** imported automatically; see [development-setup.md](development-setup.md#importing-data-from-an-earlier-database).

@@ -1,7 +1,9 @@
 """END-TO-END TEST HARNESS ONLY. Never use for real data.
 
 Runs the real FastAPI app, scan worker, and job worker in one process, but against:
-  * a throwaway SQLite database (``--data``, default: a temporary directory),
+  * a throwaway SQLite database (``--data``, default: a temporary directory), or, with
+    ``--database-url``, a disposable PostgreSQL database whose name contains "test" (schema
+    created by the real Alembic migrations; ``--redis-url`` adds the real Redis queue),
   * a scripted mock AI provider (clearly labelled "mock-e2e" in the UI),
   * an in-memory fake GitHub API plus a tiny fake authorization page,
   * the scanner's local fixture website as the scan target.
@@ -10,6 +12,8 @@ This exercises the whole workflow (scan, analysis, GitHub connection, fix, revie
 commit, pull request) in a real browser when no AI key or GitHub OAuth app is available.
 
     python -m tests.e2e.stack            # then open http://localhost:3000 (npm run dev)
+    python -m tests.e2e.stack --redis-url redis://127.0.0.1:6379/15 \
+        --database-url postgresql+psycopg://USER:PASSWORD@127.0.0.1:5433/fixify_e2e_test
 
 The web app must point at this API (API_INTERNAL_URL, default http://127.0.0.1:8000).
 """
@@ -17,6 +21,7 @@ The web app must point at this API (API_INTERNAL_URL, default http://127.0.0.1:8
 import argparse
 import asyncio
 import os
+import subprocess
 import sys
 import tempfile
 import threading
@@ -27,16 +32,20 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 FAKE_GITHUB_PORT = 8766
 
 
-def _configure(data_dir: Path, fixture_port: int) -> None:
+def _configure(
+    data_dir: Path, fixture_port: int, database_url: str | None, redis_url: str | None
+) -> None:
     from cryptography.fernet import Fernet
 
     os.environ.update(
         {
             "FIXIFY_IGNORE_ENV_FILE": "1",
             "APP_ENV": "development",
-            "DATABASE_URL": f"sqlite+aiosqlite:///{(data_dir / 'e2e.sqlite').as_posix()}",
-            "QUEUE_BACKEND": "database",
-            "REDIS_REQUIRED": "false",
+            "DATABASE_URL": database_url
+            or f"sqlite+aiosqlite:///{(data_dir / 'e2e.sqlite').as_posix()}",
+            "QUEUE_BACKEND": "redis" if redis_url else "database",
+            "REDIS_REQUIRED": "true" if redis_url else "false",
+            "REDIS_URL": redis_url or "redis://127.0.0.1:6379/0",
             "WORKER_POLL_INTERVAL_SECONDS": "1",
             "SECRET_KEY": "e2e-harness-only-" + "x" * 32,
             "PUBLIC_APP_URL": "http://localhost:3000",
@@ -131,12 +140,24 @@ async def _run(port: int, data_dir: Path) -> None:
     from app.services import github as github_service
     from app.worker.jobs import JobWorker
     from app.worker.main import ScanWorker
-    from app.worker.queue import DatabaseScanQueue
+    from app.worker.queue import create_queue
     from tests.platform_fakes import FakeGitHub
 
+    postgres = settings.database_url.startswith("postgresql")
+    if postgres:  # the real migrations, exactly as production applies them
+        migrated = subprocess.run(
+            [sys.executable, "-m", "alembic", "upgrade", "head"],
+            cwd=Path(__file__).resolve().parents[2],
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+        if migrated.returncode != 0:
+            raise SystemExit(f"alembic upgrade head failed:\n{migrated.stderr[-1500:]}")
     engine = create_async_engine(settings.database_url)
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
+    if not postgres:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     db_session.SessionFactory = factory  # get_session reads this at request time
 
@@ -147,10 +168,15 @@ async def _run(port: int, data_dir: Path) -> None:
     app.dependency_overrides[get_email_sender] = lambda: outbox
 
     server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
-    print(f"E2E harness API on http://127.0.0.1:{port} (mock AI, fake GitHub, SQLite)", flush=True)
+    backend = "PostgreSQL" if postgres else "SQLite"
+    queue = f"{settings.queue_backend} queue"
+    print(
+        f"E2E harness API on http://127.0.0.1:{port} (mock AI, fake GitHub, {backend}, {queue})",
+        flush=True,
+    )
     await asyncio.gather(
         server.serve(),
-        ScanWorker(settings, factory, DatabaseScanQueue()).run_forever(),
+        ScanWorker(settings, factory, create_queue(settings)).run_forever(),
         JobWorker(settings, factory, lambda: provider).run_forever(),
     )
 
@@ -159,7 +185,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--data", type=Path, default=None)
+    parser.add_argument(
+        "--database-url",
+        default=None,
+        help="disposable PostgreSQL database; its name must contain 'test'",
+    )
+    parser.add_argument("--redis-url", default=None, help="use the Redis queue (e.g. db 15)")
     args = parser.parse_args()
+    if args.database_url:
+        from sqlalchemy.engine import make_url
+
+        if "test" not in (make_url(args.database_url).database or "").lower():
+            parser.error("Refusing to use a database whose name does not contain 'test'.")
     data_dir = args.data or Path(tempfile.mkdtemp(prefix="fixify-e2e-"))
     data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -170,7 +207,7 @@ def main() -> None:
     threading.Thread(target=authorize.serve_forever, daemon=True).start()
     with serve_site() as (site_url, _blocked):
         fixture_port = int(urlsplit(site_url).port or 0)
-        _configure(data_dir, fixture_port)
+        _configure(data_dir, fixture_port, args.database_url, args.redis_url)
         print(f"Scan target (fixture site): {site_url}/no-title", flush=True)
         (data_dir / "harness.json").write_text(
             __import__("json").dumps({"site_url": site_url, "api_port": args.port}),

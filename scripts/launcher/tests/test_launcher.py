@@ -142,24 +142,36 @@ class ParsingTests(unittest.TestCase):
                     os.environ[key] = value
 
     def test_infra_needs(self) -> None:
+        DEFAULT_PORTS = {"postgres": 5432, "redis": 6379}  # noqa: N806
         local_pg = {
             "database": {"local": True, "scheme": "postgresql", "port": 5432},
             "redis": {"local": True, "port": 6379},
             "redis_needed": True,
         }
-        self.assertEqual(fixify.infra_needs(local_pg), {"postgres": True, "redis": True})
+        self.assertEqual(
+            fixify.infra_needs(local_pg, DEFAULT_PORTS), {"postgres": True, "redis": True}
+        )
         remote = {
             "database": {"local": False, "scheme": "postgresql", "port": 5432},
             "redis": {"local": True, "port": 6379},
             "redis_needed": False,
         }
-        self.assertEqual(fixify.infra_needs(remote), {"postgres": False, "redis": False})
+        self.assertEqual(
+            fixify.infra_needs(remote, DEFAULT_PORTS), {"postgres": False, "redis": False}
+        )
         other_port = {
             "database": {"local": True, "scheme": "postgresql", "port": 5433},
             "redis": {"local": True, "port": 1},
             "redis_needed": True,
         }
-        self.assertEqual(fixify.infra_needs(other_port), {"postgres": False, "redis": False})
+        self.assertEqual(
+            fixify.infra_needs(other_port, DEFAULT_PORTS), {"postgres": False, "redis": False}
+        )
+        # POSTGRES_HOST_PORT=5433 (native PostgreSQL on 5432): the container is on 5433.
+        moved = {"postgres": 5433, "redis": 6379}
+        local_5433 = dict(local_pg, database={"local": True, "scheme": "postgresql", "port": 5433})
+        self.assertEqual(fixify.infra_needs(local_5433, moved)["postgres"], True)
+        self.assertEqual(fixify.infra_needs(local_pg, moved)["postgres"], False)
 
     def test_worker_ready(self) -> None:
         line = '{"level": "INFO", "message": "%s"}'

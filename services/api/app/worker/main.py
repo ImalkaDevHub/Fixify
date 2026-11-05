@@ -34,6 +34,9 @@ HEARTBEAT_SECONDS = 15
 STALE_AFTER_SECONDS = 90
 SWEEP_SECONDS = 30
 CLEANUP_SECONDS = 3_600
+# While the database is unreachable: wait 2 s, 4 s, ... up to 30 s between attempts.
+OUTAGE_BACKOFF_START_SECONDS = 2
+OUTAGE_BACKOFF_MAX_SECONDS = 30
 
 
 def _now() -> datetime:
@@ -63,12 +66,22 @@ class ScanWorker:
         await self.recover_stale_runs()
         last_sweep = last_cleanup = asyncio.get_running_loop().time()
         await self.cleanup_artifacts()
+        backoff = OUTAGE_BACKOFF_START_SECONDS
         try:
             while not self._stopping:
                 await self._slots.acquire()
                 started = False
                 try:
                     started = await self._start_next()
+                    backoff = OUTAGE_BACKOFF_START_SECONDS
+                except Exception as error:  # noqa: BLE001 - a database outage must not end the worker
+                    logger.warning(
+                        "Could not look for queued scans (%s); retrying in %d s",
+                        type(error).__name__,
+                        backoff,
+                    )
+                    await asyncio.sleep(backoff)
+                    backoff = min(backoff * 2, OUTAGE_BACKOFF_MAX_SECONDS)
                 finally:
                     if not started:
                         self._slots.release()
@@ -87,8 +100,12 @@ class ScanWorker:
         candidates: list[uuid.UUID] = []
         try:
             announced = await self.queue.dequeue(self.settings.worker_poll_interval_seconds)
-        except Exception:  # noqa: BLE001 - the database sweep still finds queued work
-            logger.warning("Queue unavailable; falling back to database polling")
+        except Exception as error:  # noqa: BLE001 - the database sweep still finds queued work
+            logger.warning(
+                "Queue unavailable (%s: %s); falling back to database polling",
+                type(error).__name__,
+                str(error)[:120],
+            )
             announced = None
             await asyncio.sleep(self.settings.worker_poll_interval_seconds)
         if announced is not None:

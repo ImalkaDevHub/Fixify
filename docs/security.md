@@ -49,16 +49,19 @@ With `REQUIRE_SITE_VERIFICATION` (default: on in production), a project's host m
 
 ## Web app
 
-- A CSP with `frame-ancestors 'none'`, plus `nosniff`, `X-Frame-Options`, `Referrer-Policy`, and `Permissions-Policy`.
+- A **nonce-based CSP** built per request in `proxy.ts` (`lib/csp.ts`): `script-src 'self' 'nonce-…' 'strict-dynamic'`, with no `'unsafe-inline'` for scripts and `'unsafe-eval'` only in development. Next.js adds the nonce to its own scripts, so every page renders per request (`connection()` in the root layout). `style-src` still allows `'unsafe-inline'`, because Motion and Recharts set inline `style` attributes, which nonces cannot cover; style injection cannot run code. Also `frame-ancestors 'none'`, `object-src 'none'`, `base-uri 'self'`, `form-action 'self'`, plus `nosniff`, `X-Frame-Options`, `Referrer-Policy`, and `Permissions-Policy`.
 - The API adds `no-store`, `nosniff`, `X-Frame-Options`, and `Referrer-Policy` to every response. Screenshots are served with `default-src 'none'` and `Cross-Origin-Resource-Policy: same-origin`.
 - Redirect targets after login and notification links accept only same-site paths.
 
-## Known gaps (not production-ready until addressed)
+## Known gaps
 
-1. **Browser isolation is in-process.** Chromium is constrained by the egress proxy and launch flags, not by an OS-level network policy. For untrusted public use, run the worker in a container or VM whose network has internet egress only and no route to PostgreSQL, Redis, or the API. Until result persistence is split from browsing, the worker container still needs database access.
-2. **Ownership verification proves control, not authorization.** It is on by default in production (`REQUIRE_SITE_VERIFICATION`), and it shows that someone can publish content on the host. That is stronger than nothing, but a user who can edit one page of a shared host (for example a hosted blog) can verify the whole host. DNS TXT verification is not implemented.
-3. **In-memory rate limits without Redis.** With `QUEUE_BACKEND=database` and no Redis, limits apply per API process only.
-4. **The CSP allows `'unsafe-inline'` scripts** (Next.js hydration). A nonce-based CSP via `proxy.ts` would be stronger.
-5. **The OAuth App `repo` scope is broad.** It is the narrowest scope that can push to private repositories. A GitHub App with `contents:write` and `pull_requests:write` on selected repositories would be more granular.
-6. **No account lockout or second factor.** Only rate limits and Argon2 slow down attacks on the login.
-7. **Development email is printed to the log.** `EMAIL_BACKEND=console` writes single-use links to the API log, so it is refused in production.
+| # | Gap | Why it matters | Recommended solution | Blocks production? |
+|---|---|---|---|---|
+| 1 | **Browser isolation is in-process.** Chromium is constrained by the egress proxy and launch flags, not by an OS-level network policy, and the worker process holds database credentials. | A browser exploit on a malicious page could reach the internal network or the database. | Run the scanner in a container or VM whose network has internet egress only and no route to PostgreSQL, Redis, or the API. Split result persistence from browsing so the browsing container needs no database credentials. | **Yes**, for scanning untrusted public sites |
+| 2 | **Ownership verification proves control of one page, not authorization.** No DNS TXT method. | Someone who can edit one page of a shared host (for example a hosted blog) can verify, and then scan, the whole host. | Add DNS TXT verification and require it for shared-hosting domains. | Yes, for a public multi-tenant service |
+| 3 | **No second factor (2FA).** Login is protected by Argon2id and per-IP / per-account rate limits: 10 attempts per account per 15 minutes acts as a temporary lockout, shared across API processes through Redis. | A reused or phished password is enough to sign in. | TOTP 2FA with recovery codes, and notification of new sign-ins. | Recommended before public launch |
+| 4 | **OAuth App `repo` scope is broad.** It is the narrowest OAuth-App scope that can push to private repositories (`public_repo` limits Fixify to public ones). | A leaked token grants access to all of the user's repositories, not just the connected one. Tokens are Fernet-encrypted at rest and revocable. | Move to a GitHub App with `contents:write`, `pull_requests:write` and `metadata:read` on selected repositories, using short-lived installation tokens. | Recommended |
+| 5 | **AI fix validation is parse-only.** Full parsers cover JSON, Python, JavaScript/JSX, TypeScript/TSX and CSS. HTML-like files get tag balance; SCSS/Less get bracket balance. The parsers do not type-check, and tree-sitter accepts a mismatched JSX closing-tag name (`<div></span>`). | A proposed fix can parse and still be wrong. | Fixify never executes or merges fixes. Every change is human-reviewed and lands as a pull request, so the repository's CI must run on it. | No (by design) |
+| 6 | **`style-src 'unsafe-inline'`** (see Web app above). | Lets injected markup restyle the page; it cannot run scripts. | Remove inline style attributes from the UI libraries, or accept it. | No |
+| 7 | **Rate limits are per process without Redis.** Only with the fallback `QUEUE_BACKEND=database` and `REDIS_REQUIRED=false`. | Limits multiply with the number of API processes. | Keep Redis (the default). | No, with Redis |
+| 8 | **Development email is written to the log.** `EMAIL_BACKEND=console` writes single-use links to the API log. | Anyone who can read the log can verify accounts or reset passwords. | It is refused in production; configure SMTP there. | No (refused in production) |

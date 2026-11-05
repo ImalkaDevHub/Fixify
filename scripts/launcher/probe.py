@@ -108,8 +108,8 @@ def probe_settings() -> None:
             "ok": True,
             "app_env": settings.app_env,
             "database": db,
-            "database_is_default": settings.database_url
-            == "postgresql+psycopg://fixify:change-me-locally@localhost:5432/fixify",
+            # The .env.example placeholder password (value itself is never reported).
+            "database_is_default": _db_password(settings.database_url) == "change-me-locally",
             "queue_backend": settings.queue_backend,
             "redis_needed": settings.redis_needed,
             "redis": redis,

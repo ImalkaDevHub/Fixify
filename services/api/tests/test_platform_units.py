@@ -288,6 +288,30 @@ def test_apply_edits_is_all_or_nothing_per_edit_and_limits_files():
         ("app.ts", "f({a: 1});", "f({a: 1);", "failed"),
         ("app.ts", "f('}');", "f('{');", "passed"),  # braces inside strings are ignored
         ("notes.txt", "a", "b", "not_available"),
+        # Full parsers (tree-sitter): broken code with perfectly balanced brackets is caught.
+        ("app.js", "const a = 1;", "const = 1;", "failed"),
+        ("app.ts", "let x: number = 1;", "let x: = 1;", "failed"),
+        # (A mismatched closing tag name such as <div></span> is NOT detected: the grammar
+        # accepts any closing name; only the TypeScript compiler pairs them. An unclosed
+        # element is a parse error.)
+        ("view.tsx", "const v = <div>a</div>;", "const v = <div>a;", "failed"),
+        ("view.jsx", "const v = <a href='x'>a</a>;", "const v = <a href='x'>b</a>;", "passed"),
+        (
+            "types.ts",
+            "type A = 1;",
+            "type A<T> = T extends string ? 1 : 2; const y = <A<1>>x;",
+            "passed",
+        ),
+        ("view.tsx", "export {};", "export const A = (p: {x: number}) => <b>{p.x}</b>;", "passed"),
+        ("site.css", ".a { color: red; }", ".a { color: red; }\n.b { color; }", "failed"),
+        (
+            "site.css",
+            ".a { color: red; }",
+            "@media (max-width: 4px) { .a { color: blue; } }",
+            "passed",
+        ),
+        # A pre-existing error (e.g. syntax the grammar cannot read) is not blamed on the change.
+        ("old.js", "let a = ;\nlet b = 1;", "let a = ;\nlet b = 2;", "passed"),
     ],
 )
 def test_syntax_checks(path, before, after, status):
@@ -474,14 +498,28 @@ async def test_analytics_uses_the_run_before_the_window_as_baseline(
     client, session_factory, artifact_dir, tmp_path
 ):
     project_id = await _project(client)
-    old = await _scan(client, session_factory, artifact_dir, tmp_path, project_id,
-                      [finding("kept"), finding("fixed")], "old")
+    old = await _scan(
+        client,
+        session_factory,
+        artifact_dir,
+        tmp_path,
+        project_id,
+        [finding("kept"), finding("fixed")],
+        "old",
+    )
     async with session_factory() as session:
         run = await session.get(TestRun, uuid.UUID(old))
         run.created_at = datetime.now(UTC) - timedelta(days=40)
         await session.commit()
-    await _scan(client, session_factory, artifact_dir, tmp_path, project_id,
-                [finding("kept"), finding("brand-new")], "new")
+    await _scan(
+        client,
+        session_factory,
+        artifact_dir,
+        tmp_path,
+        project_id,
+        [finding("kept"), finding("brand-new")],
+        "new",
+    )
     data = (await client.get("/api/v1/analytics/overview?days=30")).json()
     assert data["scan_count"] == 1  # the old run is outside the window...
     assert (data["new_findings"], data["resolved_findings"]) == (1, 1)  # ...but is the baseline

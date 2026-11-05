@@ -1,16 +1,39 @@
 """Applying AI-proposed edits safely and checking the result.
 
 Edits are search-and-replace operations against file contents Fixify fetched itself. Nothing is
-executed: syntax checks only parse (json.loads, ast.parse, html.parser, delimiter balance).
+executed: syntax checks only parse (json.loads, ast.parse, tree-sitter grammars for
+JavaScript / JSX / TypeScript / TSX / CSS, html.parser, delimiter balance as a last resort).
 """
 
 import ast
 import json
 import posixpath
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import cache
 from html.parser import HTMLParser
 
 from app.ai.prompts import REDACTED, FixEdit
+
+try:  # tree-sitter: real parsers (C extensions that only build a syntax tree, never execute)
+    import tree_sitter_css
+    import tree_sitter_javascript
+    import tree_sitter_typescript
+    from tree_sitter import Language, Parser
+except ImportError:  # pragma: no cover - degraded mode: the bracket check is used instead
+    Parser = None  # type: ignore[assignment,misc]
+
+_GRAMMARS: dict[str, Callable[[], object]] = (
+    {
+        "javascript": tree_sitter_javascript.language,  # also parses JSX
+        "jsx": tree_sitter_javascript.language,
+        "typescript": tree_sitter_typescript.language_typescript,  # no JSX: allows <T>x casts
+        "tsx": tree_sitter_typescript.language_tsx,
+        "css": tree_sitter_css.language,
+    }
+    if Parser is not None
+    else {}
+)
 
 LANGUAGES = {
     ".js": "javascript",
@@ -193,6 +216,36 @@ def _delimiter_imbalance(text: str) -> int:
     return errors + len(stack)
 
 
+@cache
+def _parser(language: str) -> "Parser | None":
+    grammar = _GRAMMARS.get(language)
+    if grammar is None or Parser is None:
+        return None
+    return Parser(Language(grammar()))
+
+
+def _parse_errors(language: str, text: str) -> int | None:
+    """Number of syntax-error and missing-token nodes, or None if no full parser is available.
+
+    tree-sitter recovers from errors, so the tree is always built; only subtrees that contain
+    errors are walked.
+    """
+    parser = _parser(language)
+    if parser is None:
+        return None
+    root = parser.parse(text.encode("utf-8")).root_node
+    if not root.has_error:
+        return 0
+    errors, stack = 0, [root]
+    while stack:
+        node = stack.pop()
+        if node.is_error or node.is_missing:
+            errors += 1
+            continue
+        stack.extend(child for child in node.children if child.has_error or child.is_missing)
+    return errors
+
+
 def check_syntax(change: FileChange) -> tuple[str, str | None]:
     """(status, message) for one changed file."""
     language = language_for(change.path)
@@ -209,6 +262,19 @@ def check_syntax(change: FileChange) -> tuple[str, str | None]:
         before, after = _html_problems(change.original_text), _html_problems(change.new_text)
         if after > before:
             return "failed", f"{change.path}: the change introduces unbalanced markup tags."
+        return "passed", None
+    after_errors = _parse_errors(language, change.new_text)
+    if after_errors is not None:
+        before_errors = _parse_errors(language, change.original_text) or 0
+        # Comparative, like the other checks: a file that already had syntax the grammar
+        # cannot read (or a real error) is not blamed on the change; new errors are.
+        if after_errors > before_errors:
+            return "failed", f"{change.path}: {language} does not parse after the change."
+        if after_errors:
+            return "passed", (
+                f"{change.path}: the original file already contained {before_errors} "
+                f"{language} syntax error(s) the parser could not read; the change adds none."
+            )
         return "passed", None
     if language in _BRACKETED:
         before = _delimiter_imbalance(change.original_text)

@@ -254,3 +254,73 @@ async def test_artifact_cleanup_never_touches_another_databases_folders(
     (root / MARKER_FILE).write_text("some-other-database\n")
     await worker.cleanup_artifacts()  # another database's directory: nothing is deleted
     assert other.exists()
+
+
+async def test_scan_loop_survives_a_database_outage(session_factory, worker_settings, monkeypatch):
+    """A failed poll (database briefly unreachable) is logged and retried, never fatal."""
+    from sqlalchemy.exc import OperationalError
+
+    monkeypatch.setattr(worker_main, "OUTAGE_BACKOFF_START_SECONDS", 0)
+    worker = ScanWorker(worker_settings, session_factory, FakeQueue())
+    calls = 0
+
+    async def flaky_start_next() -> bool:
+        nonlocal calls
+        calls += 1
+        if calls <= 2:
+            raise OperationalError("SELECT 1", {}, Exception("could not connect"))
+        worker._stopping = True
+        return False
+
+    monkeypatch.setattr(worker, "_start_next", flaky_start_next)
+    await asyncio.wait_for(worker.run_forever(), timeout=10)
+    assert calls == 3
+    assert not worker._slots.locked()  # every slot was released
+
+
+async def test_job_loop_survives_a_database_outage(session_factory, monkeypatch):
+    from sqlalchemy.exc import OperationalError
+
+    from app.worker import jobs as jobs_module
+
+    monkeypatch.setattr(jobs_module, "OUTAGE_BACKOFF_START_SECONDS", 0)
+    worker = jobs_module.JobWorker(Settings(), session_factory, lambda: None)
+    calls = 0
+
+    async def flaky_start_due() -> int:
+        nonlocal calls
+        calls += 1
+        if calls <= 2:
+            raise OperationalError("SELECT 1", {}, Exception("could not connect"))
+        worker._stopping = True
+        return 0
+
+    monkeypatch.setattr(worker, "start_due", flaky_start_due)
+    await asyncio.wait_for(worker.run_forever(), timeout=10)
+    assert calls == 3
+
+
+async def test_termination_signal_cancels_the_worker_for_a_clean_shutdown():
+    """SIGTERM (docker stop) must reach the shutdown path instead of killing the process."""
+    import signal
+
+    from app.worker import __main__ as worker_entry
+
+    original = signal.getsignal(signal.SIGTERM)
+    task = asyncio.ensure_future(asyncio.sleep(30))
+    try:
+        worker_entry._install_shutdown_handlers(asyncio.get_running_loop(), task)
+        signal.raise_signal(signal.SIGTERM)
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=5)
+    finally:
+        for name in ("SIGINT", "SIGTERM", "SIGBREAK"):
+            if hasattr(signal, name):
+                signal.signal(
+                    getattr(signal, name),
+                    original
+                    if name == "SIGTERM"
+                    else signal.default_int_handler
+                    if name == "SIGINT"
+                    else signal.SIG_DFL,
+                )

@@ -14,10 +14,10 @@ class Settings(BaseSettings):
     app_name: str = "Fixify API"
     app_env: str = "development"
     database_url: str = (
-        "postgresql+psycopg://fixify:change-me-locally@localhost:5432/fixify"
+        "postgresql+psycopg://fixify:change-me-locally@127.0.0.1:5432/fixify"
     )
     database_connect_timeout_seconds: int = 5
-    redis_url: str = "redis://localhost:6379/0"
+    redis_url: str = "redis://127.0.0.1:6379/0"
     redis_required: bool = True
     api_cors_origins: str = "http://localhost:3000"
 

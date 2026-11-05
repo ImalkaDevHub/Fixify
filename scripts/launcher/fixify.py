@@ -904,17 +904,27 @@ def container_state(base: list[str], service: str) -> tuple[str, str]:
     return status, health
 
 
-def infra_needs(settings: dict) -> dict[str, bool]:
+def published_ports(config: Config | None = None) -> dict[str, int]:
+    """Host ports infra/docker-compose.yml publishes (POSTGRES_HOST_PORT / REDIS_HOST_PORT)."""
+    config = config or load_config()
+    return {
+        "postgres": _int(config.get("POSTGRES_HOST_PORT", "5432"), 5432),
+        "redis": _int(config.get("REDIS_HOST_PORT", "6379"), 6379),
+    }
+
+
+def infra_needs(settings: dict, ports: dict[str, int] | None = None) -> dict[str, bool]:
     """Which Compose services this configuration needs: a local URL on the published port."""
+    ports = ports or published_ports()
     db = settings.get("database", {})
     redis = settings.get("redis", {})
     return {
         "postgres": bool(db.get("local"))
         and db.get("scheme") == "postgresql"
-        and db.get("port") in (None, 5432),
+        and (db.get("port") or 5432) == ports["postgres"],
         "redis": bool(settings.get("redis_needed"))
         and bool(redis.get("local"))
-        and redis.get("port") in (None, 6379),
+        and (redis.get("port") or 6379) == ports["redis"],
     }
 
 
@@ -954,7 +964,7 @@ def start_infra(services: list[str]) -> list[str]:
     if base is None:
         raise StartError("Docker Compose is not available (docker compose / docker-compose).")
     already = [s for s in services if container_state(base, s)[0] == "running"]
-    published = {"postgres": 5432, "redis": 6379}  # from infra/docker-compose.yml
+    published = published_ports()
     for service in services:
         port = published[service]
         if service not in already and port_in_use("127.0.0.1", port):
@@ -1051,7 +1061,7 @@ def report_env_vars(config: Config, settings: dict | None) -> bool:
 
     show("DATABASE_URL", True)
     if settings and settings.get("database_is_default"):
-        line("warn", "DATABASE_URL", "is the .env.example placeholder (local Docker PostgreSQL)")
+        line("warn", "DATABASE_URL", "uses the .env.example placeholder password; replace it")
     redis_needed = (settings or {}).get(
         "redis_needed", config.get("QUEUE_BACKEND", "redis") == "redis"
     )
@@ -1131,10 +1141,19 @@ def prepare_backend(config: Config, migrate: str = "ask") -> dict:
         )
         line("skip", "Redis container", f"not needed: {why}")
     wanted = []
+    base = compose_base() if any(needs.values()) and shutil.which("docker") else None
     for service, probe_name in (("postgres", "db"), ("redis", "redis")):
         if needs[service]:
             if probe(probe_name).get("ok"):
-                line("ok", f"{service}", "already reachable on localhost; Docker not needed")
+                status, health = container_state(base, service) if base else ("absent", "")
+                if status == "running":
+                    line(
+                        "ok",
+                        f"{service} container",
+                        f"already running{', ' + health if health else ''}",
+                    )
+                else:
+                    line("ok", service, "already reachable (not a Compose container); left as is")
             else:
                 wanted.append(service)
     if wanted:

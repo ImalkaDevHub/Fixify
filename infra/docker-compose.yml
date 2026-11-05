@@ -1,7 +1,8 @@
 # Local infrastructure. Default: PostgreSQL + Redis only (run the API, worker, and web app on the
 # host). Opt-in profiles:
 #   --profile worker   browser worker in a hardened container
-#   --profile app      API and web app containers (use together with --profile worker)
+#   --profile app      migrations (one-shot), API and web app containers
+#                      (use together with --profile worker)
 # Secrets are read from the root .env (see .env.example); nothing secret is hard-coded here.
 
 x-backend-env: &backend-env
@@ -38,8 +39,10 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-fixify}
       POSTGRES_USER: ${POSTGRES_USER:-fixify}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-locally}
+    # Host port is configurable (POSTGRES_HOST_PORT) for machines that already run a native
+    # PostgreSQL on 5432. Bound to 127.0.0.1 only. Containers reach it as postgres:5432.
     ports:
-      - "127.0.0.1:5432:5432"
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -53,7 +56,7 @@ services:
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     ports:
-      - "127.0.0.1:6379:6379"
+      - "127.0.0.1:${REDIS_HOST_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -74,6 +77,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     environment: *backend-env
     # The API serves screenshots from the same directory.
     volumes:
@@ -87,6 +92,22 @@ services:
     cap_drop: ["ALL"]
     security_opt: ["no-new-privileges:true"]
 
+  # One-shot: applies Alembic migrations (forward only) before the API starts.
+  migrate:
+    profiles: ["app", "worker"]
+    build:
+      context: ../services/api
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment: *backend-env
+    read_only: true
+    tmpfs: ["/tmp"]
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+
   api:
     profiles: ["app"]
     build:
@@ -97,6 +118,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     environment:
       <<: *backend-env
       # Only the web container forwards client addresses.
@@ -116,7 +139,9 @@ services:
       args:
         API_INTERNAL_URL: http://api:8000
     restart: unless-stopped
-    depends_on: [api]
+    depends_on:
+      api:
+        condition: service_healthy
     ports:
       - "127.0.0.1:3000:3000"
     cap_drop: ["ALL"]

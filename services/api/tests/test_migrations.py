@@ -1,7 +1,7 @@
 """Opt-in migration check against a real PostgreSQL database.
 
 Set TEST_DATABASE_URL to a disposable database whose name contains "test", for example
-postgresql+psycopg://user:password@localhost:5432/fixify_migration_test. The test applies the
+postgresql+psycopg://user:password@127.0.0.1:5432/fixify_migration_test. The test applies the
 migrations, checks the model has no drift, and downgrades back to an empty schema.
 """
 
