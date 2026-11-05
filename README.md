@@ -46,24 +46,66 @@ flowchart LR
 
 Details: [docs/architecture.md](docs/architecture.md) · [docs/security.md](docs/security.md) · [docs/scanner.md](docs/scanner.md)
 
-## Quick start (Windows PowerShell)
+## Quick start
 
-Prerequisites: Python 3.12+, Node.js 20.9+, PostgreSQL (Docker Desktop, a native install, or a hosted database), and optionally Redis.
+Prerequisites:
+
+| | Required | Notes |
+|---|---|---|
+| Python | 3.12+ | for the API and worker (virtual environment in `services/api/.venv`) |
+| Node.js / npm | 20.9+ | for the web app |
+| PostgreSQL | yes | Docker Desktop (the launcher starts it), a native install, or a hosted database such as Supabase |
+| Docker + Compose | optional | only if PostgreSQL or Redis should run locally in containers |
+| Redis | optional | not needed with `QUEUE_BACKEND=database` and `REDIS_REQUIRED=false` |
+
+### 1. One-time setup
+
+Windows (PowerShell):
 
 ```powershell
-# 1. Configuration
 Copy-Item .env.example .env          # then edit DATABASE_URL (and optional AI / GitHub keys)
-# Without Redis, set QUEUE_BACKEND=database and REDIS_REQUIRED=false in .env
-
-# 2. Infrastructure (skip if you use native or hosted PostgreSQL)
-docker compose --env-file .env -f infra/docker-compose.yml up -d
-
-# 3. Backend
 cd services/api
 python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+.\.venv\Scripts\python.exe -m playwright install chromium
+cd ../../apps/web
+npm install
+cd ../..
+```
+
+Linux / macOS:
+
+```bash
+cp .env.example .env                 # then edit DATABASE_URL (and optional AI / GitHub keys)
+(cd services/api && python3 -m venv .venv && .venv/bin/pip install -e ".[dev]" && .venv/bin/python -m playwright install chromium)
+(cd apps/web && npm install)
+chmod +x fixify.sh
+```
+
+Without Redis, set `QUEUE_BACKEND=database` and `REDIS_REQUIRED=false` in `.env`. The web app needs no `.env.local`: the launcher points it at the API automatically.
+
+### 2. Start everything with one command
+
+```powershell
+.\fixify.ps1 start                   # Windows
+```
+
+```bash
+./fixify.sh start                    # Linux / macOS
+```
+
+The launcher validates `.env` and the tools, starts the PostgreSQL / Redis containers your `.env` needs, checks the database, Redis and pending migrations, then starts the API, the worker and the web app. Each step waits for a real health check. It then prints the URLs (by default <http://localhost:3000> for the app and <http://127.0.0.1:8000> for the API).
+
+Run `.\fixify.ps1` or `./fixify.sh` without arguments for the interactive menu. The full reference is in [Local launcher](#local-launcher) below.
+
+Open <http://localhost:3000>, create an account, and verify the email. With `EMAIL_BACKEND=console` the verification link is written to the API log (`.\fixify.ps1 logs api`). Then add a project and run a scan.
+
+### Running the services by hand (alternative)
+
+```powershell
+docker compose --env-file .env -f infra/docker-compose.yml up -d   # skip with native or hosted PostgreSQL
+cd services/api
 .\.venv\Scripts\Activate.ps1
-python -m pip install -e ".[dev]"
-python -m playwright install chromium
 alembic upgrade head
 python -m app.serve                  # API on http://127.0.0.1:8000
 ```
@@ -85,9 +127,66 @@ npm install
 npm run dev                          # http://localhost:3000
 ```
 
-Open <http://localhost:3000>, create an account, and verify the email. With `EMAIL_BACKEND=console` the verification link is printed in the API terminal. Then add a project and run a scan.
-
 > Projects created before authentication existed have no owner and are hidden. Assign them to your account with `python -m app.cli assign-orphans --email you@example.com`.
+
+## Local launcher
+
+`fixify.ps1` (Windows PowerShell 5.1 / 7) and `fixify.sh` (bash on Linux, macOS, WSL or Git Bash) are thin wrappers around one launcher, [`scripts/launcher/fixify.py`](scripts/launcher/fixify.py). It uses only the Python standard library, so both platforms behave the same and nothing has to be installed globally. The wrappers prefer the API virtual environment and fall back to a system Python, so `status` and `--help` work before setup is finished.
+
+### Commands
+
+| Windows | Linux / macOS | What it does |
+|---|---|---|
+| `.\fixify.ps1` | `./fixify.sh` | Interactive menu |
+| `.\fixify.ps1 start [--migrate]` | `./fixify.sh start [--migrate]` | Full startup with health checks (see below) |
+| `.\fixify.ps1 infra [--all]` | `./fixify.sh infra [--all]` | Only the PostgreSQL / Redis containers this `.env` needs (`--all`: both) |
+| `.\fixify.ps1 stop [--keep-infra]` | `./fixify.sh stop [--keep-infra]` | Stop the web app, worker and API, then the containers the launcher started |
+| `.\fixify.ps1 restart` | `./fixify.sh restart` | Restart the application services; containers are not recreated |
+| `.\fixify.ps1 status` | `./fixify.sh status` | Tool versions, configuration, database, Redis, migrations and services |
+| `.\fixify.ps1 logs [name] [-f] [-n 200]` | `./fixify.sh logs [name] [-f] [-n 200]` | `web`, `api`, `worker`, `postgres`, `redis` or `all` |
+| `.\fixify.ps1 migrate [--yes]` | `./fixify.sh migrate [--yes]` | Show pending Alembic migrations and apply them |
+| `.\fixify.ps1 open` | `./fixify.sh open` | Open the web app in the browser |
+| `.\fixify.ps1 --help` | `./fixify.sh --help` | Help |
+
+Exit codes: `0` success, `1` a check or service failed, `2` usage error, `130` interrupted.
+
+### What `start` does
+
+1. **Environment:** `.env`, the API virtual environment and `apps/web/node_modules` must exist. Required settings are checked, and optional ones (AI, GitHub) are reported as disabled. Only "configured" or "not set" is shown, never a value. The settings are loaded with the API's own configuration class, so validation errors match what the API would report.
+2. **Tools:** Node.js 20.9+, npm, and Python 3.12+ in the virtual environment.
+3. **Infrastructure:** a Compose container is started only when `DATABASE_URL` / `REDIS_URL` point at `localhost` on the published port (5432 / 6379) and nothing is already serving there. A hosted database such as Supabase, `QUEUE_BACKEND=database`, or a native PostgreSQL needs no Docker. The launcher waits for the containers' health checks.
+4. **Connectivity:** connects to PostgreSQL (`SELECT version()`) and pings Redis if the configuration uses it, with up to three attempts.
+5. **Migrations:** compares the database revision with the Alembic head, read-only. If migrations are pending, it asks before applying them; with `--migrate` or `FIXIFY_AUTO_MIGRATE=1` it applies them without asking. Without a terminal and without either option, it stops and tells you to run `migrate`. It never starts the app on an outdated schema.
+6. **API:** `python -m app.serve`. Ready when `GET /api/v1/health/ready` returns 200.
+7. **Worker:** `python -m app.worker`. The worker has no HTTP endpoint, so it is ready when its log shows that the scan worker, job worker and scheduler started, with no error, and it is still running a few seconds later.
+8. **Web app:** `next dev`, read from `apps/web/package.json`. Ready when `/` answers with a non-5xx status. The first compile can take up to a minute.
+
+If a step fails, the launcher names the failing service, shows the last log lines, and stops every service that this run started. Services that were already running are left alone. Ports come from configuration: `API_HOST` / `API_PORT` (default `127.0.0.1:8000`), and `PORT` or the port in `PUBLIC_APP_URL` for the web app (default `3000`). `API_INTERNAL_URL` is passed to the web app unless `apps/web/.env.local` sets it.
+
+### Processes, logs and safety
+
+* Each service runs under a small supervisor ([`supervise.py`](scripts/launcher/supervise.py)) in its own process group, detached from the terminal, so services keep running after `start` returns or the terminal closes. Stop them with `stop`.
+* `runtime/` holds the launcher state: PID **and** process creation time for each supervisor and service. A PID is acted on only if both still match, so a reused PID is never stopped. Stale state is detected and cleared automatically. The launcher never kills by port number, and if a port is busy it names the owning process and stops.
+* `stop` is graceful first: Ctrl+Break on Windows, SIGINT on Linux/macOS. After 15 seconds it force-stops the service's own process tree. Containers are stopped with `docker compose stop`, only if the launcher started them. The launcher never runs `down -v` and never deletes a volume.
+* Ctrl+C during `start` stops the services that run started. Ctrl+C while following logs only stops the log view.
+* `logs/<service>.log` collects each service's output, with a header at every start and the exit reason at every stop. Files rotate at 10 MB. PostgreSQL and Redis logs come from `docker compose logs`.
+* `runtime/` and `logs/` are git-ignored.
+
+### Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `.env missing` | `Copy-Item .env.example .env` (Windows) or `cp .env.example .env`, then set `DATABASE_URL`. |
+| `services/api/.venv missing` / `apps/web/node_modules missing` | Run the [one-time setup](#1-one-time-setup). |
+| `PostgreSQL at … is unreachable: failed to resolve host 'db.<ref>.supabase.co'` | Supabase's direct host is IPv6-only. On an IPv4-only network, use the **Session pooler** connection string from Supabase: **Connect → Session pooler**, user `postgres.<ref>`, port 5432. |
+| `Docker is needed for local postgres, but the Docker daemon is not running` | Start Docker Desktop, or point `DATABASE_URL` at a running or hosted PostgreSQL. |
+| `port 5432 is already used by another process` | A native PostgreSQL is running. Point `DATABASE_URL` at it, or stop it before using the container. |
+| `port 3000 is already in use … node.exe` / `Another next dev server is already running` | A manually started `npm run dev` is still running. Stop it (Ctrl+C in its terminal). Next.js allows one dev server per project folder. |
+| `pending migration(s)` | `.\fixify.ps1 migrate`, or `start --migrate`. |
+| A service failed to start | `.\fixify.ps1 logs api` (or `worker` / `web`). The failure message also shows the last log lines. |
+| Scripts are blocked: "running scripts is disabled on this system" | `powershell -ExecutionPolicy Bypass -File .\fixify.ps1 start`, or once: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`. |
+
+Launcher tests: `services\api\.venv\Scripts\python.exe -m unittest discover -s scripts/launcher/tests -v` (Windows), or `services/api/.venv/bin/python -m unittest discover -s scripts/launcher/tests -v` (Linux / macOS).
 
 ## Configuration
 
