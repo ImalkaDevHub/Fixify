@@ -44,6 +44,32 @@
   color-scheme: dark;
 }
 
+/* Scoped light theme: overrides the same tokens the whole app already renders with,
+   so any subtree carrying this attribute (e.g. the public landing page) repaints
+   correctly with no component changes. */
+[data-theme="light"] {
+  color-scheme: light;
+  --color-canvas: #ebe9e5;
+  --color-panel: #f3f1ed;
+  --color-card: #ffffff;
+  --color-elevated: #ffffff;
+  --color-line: #ddd9d1;
+  --color-line-soft: #e6e3dc;
+  --color-ink: #151514;
+  --color-muted: #5b5954;
+  --color-subtle: #87847d;
+  --color-violet: #7c3aed;
+  --color-violet-soft: #6d28d9;
+  --color-cyan: #0e7490;
+  --color-success: #047857;
+  --color-warning: #b45309;
+  --color-critical: #be123c;
+  --color-high: #c2410c;
+  --color-medium: #b45309;
+  --color-low: #0369a1;
+  --color-info: #57534e;
+}
+
 * {
   border-color: var(--color-line);
 }
@@ -95,17 +121,6 @@ body {
   color: transparent;
 }
 
-.filament-flow {
-  stroke-dasharray: 6 22;
-  animation: filament-drift 24s linear infinite;
-}
-
-@keyframes filament-drift {
-  to {
-    stroke-dashoffset: -280;
-  }
-}
-
 .skeleton {
   background: linear-gradient(90deg, rgba(38, 50, 73, 0.55) 0px, rgba(56, 72, 102, 0.6) 60px, rgba(38, 50, 73, 0.55) 120px);
   background-size: 800px 100%;
@@ -130,10 +145,6 @@ body {
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
-  }
-
-  .filament-flow {
-    animation: none;
   }
 }
 
