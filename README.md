@@ -220,7 +220,7 @@ Security checks include npm and Python dependency audits, GitHub Actions linting
 
 To inspect a run, open the repository's **Actions** tab, select the failed run and job, then expand the failing step. For local equivalents and the disposable database/browser setup, see [docs/testing.md](docs/testing.md). To make CI a merge requirement, enable branch protection for `main` and require the **CI result** status check. `development` is also configured as a trigger and can be protected if that branch is created.
 
-The workflow has been implemented locally but has not yet been verified by a remote GitHub Actions run. A local `npm audit` on 2026-11-05 found 8 existing advisories (1 high, 7 moderate); the high-severity Zod fix requires a major-version upgrade, so dependencies were not automatically changed. The CI audit will also report the Python dependency state.
+The workflow has been implemented locally but has not yet been verified by a remote GitHub Actions run. The frontend dependency audit gates on production dependencies only; see [docs/status.md](docs/status.md#continuous-integration) for the current findings. The CI audit will also report the Python dependency state.
 
 ## Docker images
 

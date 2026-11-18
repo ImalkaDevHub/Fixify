@@ -10,7 +10,7 @@ The GitHub Actions CI workflow is implemented in [`.github/workflows/ci.yml`](..
 
 **Remote status: not yet verified.** A successful local test or image build does not establish that the GitHub-hosted workflow has passed. Run it from the repository's Actions tab after pushing this workflow.
 
-**Known dependency findings:** local `npm audit` on 2026-11-05 reports 8 advisories (1 high, 7 moderate), including a high-severity Zod advisory whose suggested fix requires a major-version upgrade. No dependency upgrades were made as part of CI setup. The first CI run will also execute `pip-audit` and report the current Python dependency state.
+**Known dependency findings:** `npm audit` on 2026-11-18 found 11 advisories (4 high, 7 moderate). `npm audit fix` (no `--force`) resolved the `minimatch` and `next` findings without any `package.json` change. The remaining high-severity `picomatch` ReDoS (GHSA-fc5q-39xc-vjpf) has **no fixed release at any version**; it reaches the tree only through the `typescript-eslint` devDependency (lint-time only, never part of the shipped build) — `npm audit --omit=dev` reports 0 vulnerabilities. CI (`.github/workflows/ci.yml`) runs the full audit for visibility but gates only on `--omit=dev`; revisit once picomatch ships a fix. The first CI run will also execute `pip-audit` and report the current Python dependency state.
 
 ## Architecture
 
