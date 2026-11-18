@@ -12,6 +12,9 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 import anthropic
+from google import genai
+from google.genai import errors as genai_errors
+from google.genai import types as genai_types
 
 from app.core.config import Settings, settings
 
@@ -45,7 +48,8 @@ class AIError(Exception):
 class AIUnavailableError(AIError):
     def __init__(self) -> None:
         super().__init__(
-            "AI analysis is not configured on this server (AI_PROVIDER / ANTHROPIC_API_KEY).",
+            "AI analysis is not configured on this server "
+            "(AI_PROVIDER / ANTHROPIC_API_KEY / GEMINI_API_KEY).",
             retryable=False,
         )
 
@@ -144,12 +148,89 @@ def _request_id(error: anthropic.APIStatusError) -> str:
     return error.response.headers.get("request-id", "unknown") if error.response else "unknown"
 
 
+class GeminiProvider:
+    name = "gemini"
+
+    def __init__(self, config: Settings) -> None:
+        self.model = config.ai_model
+        self._client = genai.Client(
+            api_key=config.gemini_api_key.get_secret_value(),
+            http_options=genai_types.HttpOptions(
+                timeout=config.ai_timeout_seconds * 1000,
+                retry_options=genai_types.HttpRetryOptions(attempts=config.ai_max_retries + 1),
+            ),
+        )
+
+    async def generate_json(
+        self, *, system: str, user_content: str, schema: dict[str, Any], max_tokens: int
+    ) -> AIResult:
+        request_config = genai_types.GenerateContentConfig(
+            system_instruction=system,
+            response_mime_type="application/json",
+            response_json_schema=schema,
+            max_output_tokens=max_tokens,
+        )
+        try:
+            response = await self._client.aio.models.generate_content(
+                model=self.model, contents=user_content, config=request_config
+            )
+        except genai_errors.ClientError as error:
+            if error.code in (401, 403):
+                logger.error("AI provider rejected credentials (status %s)", error.code)
+                raise AIError(
+                    "The AI provider rejected the configured API key.", retryable=False
+                ) from error
+            if error.code == 404:
+                raise AIError(
+                    f"The AI model {self.model!r} is not available.", retryable=False
+                ) from error
+            if error.code == 429:
+                raise AIError(
+                    "The AI provider is rate limiting requests.", retryable=True
+                ) from error
+            logger.error("AI request rejected: %s (status %s)", error.message, error.code)
+            raise AIError("The AI provider rejected the request.", retryable=False) from error
+        except genai_errors.ServerError as error:
+            logger.warning("AI provider error %s", error.code)
+            raise AIError("The AI provider returned an error.", retryable=True) from error
+        except TimeoutError as error:
+            raise AIError(
+                "The AI provider could not be reached in time.", retryable=True
+            ) from error
+
+        candidates = response.candidates or []
+        finish_reason = candidates[0].finish_reason if candidates else None
+        if finish_reason == genai_types.FinishReason.MAX_TOKENS:
+            raise AIError("The AI response exceeded the output limit.", retryable=False)
+        if finish_reason not in (None, genai_types.FinishReason.STOP):
+            raise AIError("The AI model declined to analyze this content.", retryable=False)
+        text = response.text
+        if text is None:
+            raise AIError("The AI provider returned no answer.", retryable=True)
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as error:
+            raise AIError("The AI provider returned malformed output.", retryable=True) from error
+        if not isinstance(data, dict):
+            raise AIError("The AI provider returned malformed output.", retryable=True)
+        usage = response.usage_metadata
+        return AIResult(
+            data=data,
+            provider=self.name,
+            model=response.model_version or self.model,
+            input_tokens=int(getattr(usage, "prompt_token_count", 0) or 0),
+            output_tokens=int(getattr(usage, "candidates_token_count", 0) or 0),
+        )
+
+
 _provider: AIProvider | None = None
 
 
 def create_ai_provider(config: Settings = settings) -> AIProvider | None:
     if not config.ai_configured:
         return None
+    if config.ai_provider == "gemini":
+        return GeminiProvider(config)
     return AnthropicProvider(config)
 
 

@@ -22,7 +22,7 @@ Fixify scans websites in a real browser, explains what broke with AI, and propos
 |---|---|
 | 🔐 **Accounts** | Registration, email verification, login, password reset, sessions, account deletion. Every project belongs to one user. |
 | 🕷️ **Scan** | A separate worker opens the site in headless Chromium and runs rule-based checks: navigation, console errors, exceptions, failed requests, HTTP errors, broken links, images, alt text, headings, meta description, mixed content, load time, and a screenshot. |
-| 🧠 **Analyze** | AI (Claude by default) explains a finding from its recorded, sanitized evidence: summary, root cause, impact, solution, complexity, confidence, related code. |
+| 🧠 **Analyze** | AI (Gemini by default) explains a finding from its recorded, sanitized evidence: summary, root cause, impact, solution, complexity, confidence, related code. |
 | 🐙 **Connect GitHub** | OAuth, repository and branch selection. Files are read through the API, never cloned or executed. |
 | 🛠️ **Propose a fix** | AI proposes search-and-replace edits against real files; Fixify validates them before anyone sees them. |
 | 👀 **Review** | Side-by-side diff, approve, reject, comment, regenerate with feedback, reopen. |
@@ -40,7 +40,7 @@ flowchart LR
     K["Worker<br/>scans · jobs · scheduler"] <--> P
     R --> K
     K -->|stripped env| S["Scanner process"] --> X["Egress proxy<br/>URL policy"] --> C["Headless Chromium"]
-    K -->|AI jobs| AI["Claude API"]
+    K -->|AI jobs| AI["Gemini / Claude API"]
     K -->|"GitHub REST (user token)"| G["GitHub"]
 ```
 
@@ -195,7 +195,7 @@ Launcher tests: `services\api\.venv\Scripts\python.exe -m unittest discover -s s
 | Database | everything | `DATABASE_URL` | [development-setup](docs/development-setup.md) |
 | Sessions | production | `SECRET_KEY`, `PUBLIC_APP_URL` | [authentication](docs/authentication.md) |
 | Email | verification and reset links | `EMAIL_BACKEND=smtp`, `SMTP_*` | [authentication](docs/authentication.md) |
-| AI | analysis and fixes | `ANTHROPIC_API_KEY`, `AI_MODEL`, `AI_EFFORT` | [ai](docs/ai.md) |
+| AI | analysis and fixes | `AI_PROVIDER`, `GEMINI_API_KEY` or `ANTHROPIC_API_KEY`, `AI_MODEL` | [ai](docs/ai.md) |
 | GitHub | repositories and pull requests | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `TOKEN_ENCRYPTION_KEY` | [github-oauth](docs/github-oauth.md) |
 
 Every setting, with its default and bounds, is in [services/api/.env.example](services/api/.env.example). Never put secrets in `NEXT_PUBLIC_*` variables; the web app needs only the server-side `API_INTERNAL_URL`.

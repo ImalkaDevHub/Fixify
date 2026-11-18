@@ -90,10 +90,12 @@ class Settings(BaseSettings):
 
     # --- AI analysis and fix generation ---------------------------------------------------
     # "none" switches AI off; the rest of Fixify keeps working and the UI says AI is unavailable.
-    ai_provider: Literal["anthropic", "none"] = "anthropic"
+    ai_provider: Literal["anthropic", "gemini", "none"] = "gemini"
     anthropic_api_key: SecretStr = SecretStr("")
-    # Any Claude model ID. For a low-cost setup use e.g. AI_MODEL=claude-haiku-5-5, AI_EFFORT=low.
-    ai_model: str = "claude-opus-5-5"
+    gemini_api_key: SecretStr = SecretStr("")
+    # A Claude model ID (AI_PROVIDER=anthropic) or a Gemini model ID (AI_PROVIDER=gemini).
+    ai_model: str = "gemini-3.5-flash"
+    # Anthropic only; ignored by the Gemini provider.
     ai_effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
     ai_timeout_seconds: int = Field(default=120, ge=10, le=600)
     ai_max_retries: int = Field(default=2, ge=0, le=5)
@@ -126,9 +128,11 @@ class Settings(BaseSettings):
 
     @property
     def ai_configured(self) -> bool:
-        return self.ai_provider == "anthropic" and bool(
-            self.anthropic_api_key.get_secret_value().strip()
-        )
+        if self.ai_provider == "anthropic":
+            return bool(self.anthropic_api_key.get_secret_value().strip())
+        if self.ai_provider == "gemini":
+            return bool(self.gemini_api_key.get_secret_value().strip())
+        return False
 
     @property
     def github_configured(self) -> bool:

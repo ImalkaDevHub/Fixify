@@ -3,19 +3,35 @@
 ## Setup
 
 ```env
-AI_PROVIDER=anthropic
-ANTHROPIC_API_KEY=sk-ant-...        # server side only
-AI_MODEL=claude-opus-5-5            # default
-AI_EFFORT=medium                    # low | medium | high | xhigh | max
+AI_PROVIDER=gemini                  # default; "anthropic" or "none" also work
+GEMINI_API_KEY=...                  # server side only
+AI_MODEL=gemini-3.5-flash           # default
 ```
 
-**Low-cost configuration:** `AI_MODEL=claude-haiku-5-5` and `AI_EFFORT=low`. Any Claude model ID works. `AI_PROVIDER=none`, or an empty key, switches AI off: the API reports `available: false`, the UI says AI is not configured, and nothing is simulated.
+Anthropic is still supported as an alternative:
+
+```env
+AI_PROVIDER=anthropic
+ANTHROPIC_API_KEY=sk-ant-...        # server side only
+AI_MODEL=claude-opus-5-5            # default for this provider
+AI_EFFORT=medium                    # low | medium | high | xhigh | max; ignored by Gemini
+```
+
+**Low-cost configuration:** `AI_MODEL=claude-haiku-5-5` and `AI_EFFORT=low` (Anthropic), or `AI_MODEL=gemini-3.5-flash` (Gemini, already the default). Any model ID for the selected provider works. `AI_PROVIDER=none`, or an empty key, switches AI off: the API reports `available: false`, the UI says AI is not configured, and nothing is simulated.
 
 Limits: `AI_TIMEOUT_SECONDS` (120), `AI_MAX_RETRIES` (2, done by the SDK for 408/409/429/5xx and connection errors), `AI_MAX_OUTPUT_TOKENS` (16,000), and `AI_JOBS_PER_USER_PER_HOUR` (30). Job-level retries (`JOB_MAX_ATTEMPTS`, with backoff) apply only to transient errors. Refusals, bad keys, and invalid requests fail immediately with a visible reason.
 
 ## Implementation
 
-`app/ai/provider.py` defines `AIProvider.generate_json(system, user_content, schema, max_tokens)`. `AnthropicProvider` uses the official `anthropic` Python SDK (`AsyncAnthropic`):
+`app/ai/provider.py` defines `AIProvider.generate_json(system, user_content, schema, max_tokens)`. `create_ai_provider` selects `GeminiProvider` or `AnthropicProvider` from `AI_PROVIDER`.
+
+`GeminiProvider` uses the official `google-genai` Python SDK (`genai.Client(...).aio.models.generate_content`):
+
+- `GenerateContentConfig(system_instruction=..., response_mime_type="application/json", response_json_schema=..., max_output_tokens=...)`, so the response is schema-constrained JSON.
+- The first candidate's `finish_reason` is checked before the content is read (anything other than `STOP` — `SAFETY`, `MAX_TOKENS`, etc. — is reported, not parsed).
+- Errors map to a public message plus a retryable flag (`ClientError` 401/403 → bad key, 404 → unknown model, 429 → rate limited and retryable, other 4xx → rejected; `ServerError` → retryable). Keys and provider internals are never shown to users.
+
+`AnthropicProvider` uses the official `anthropic` Python SDK (`AsyncAnthropic`):
 
 - `client.beta.messages.create(...)` with `output_config = {"effort": AI_EFFORT, "format": {"type": "json_schema", "schema": ...}}`, so the response is schema-constrained JSON.
 - For models that support it (Claude Fable 5.1, Opus 5.5, Opus 5, Sonnet 5.5), the server-side refusal fallback `fallbacks: "default"` with the `server-side-fallback-2026-07-01` beta. It is switched off with `AI_REFUSAL_FALLBACK=false`, and never sent to Haiku.
