@@ -1,17 +1,20 @@
 @import "tailwindcss";
 
 @theme {
-  --color-canvas: #090d1a;
-  --color-panel: #0e1424;
-  --color-card: #11182a;
-  --color-elevated: #182238;
-  --color-line: #263249;
-  --color-line-soft: #1c2639;
-  --color-ink: #f1f5f9;
-  --color-muted: #94a3b8;
-  --color-subtle: #64748b;
-  --color-violet: #8b5cf6;
-  --color-violet-soft: #a78bfa;
+  /* Dark is the base palette declared here; [data-theme="light"] below overrides every one of
+     these to the same names, so every component that reads a --color-* token is theme-aware for
+     free. Neutral near-black (never pure #000) per the Linear/Vercel-style direction. */
+  --color-canvas: #111114;
+  --color-panel: #17171b;
+  --color-card: #1b1b21;
+  --color-elevated: #222228;
+  --color-line: #2c2c33;
+  --color-line-soft: #232329;
+  --color-ink: #f5f5f5;
+  --color-muted: #a5a1ac;
+  --color-subtle: #716d7a;
+  --color-violet: #a78bfa;
+  --color-violet-soft: #8b5cf6;
   --color-cyan: #22d3ee;
   --color-success: #34d399;
   --color-warning: #fbbf24;
@@ -26,7 +29,7 @@
 
   --radius-card: 14px;
   --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 12px 32px -18px rgba(0, 0, 0, 0.7);
-  --shadow-glow: 0 0 0 1px rgba(139, 92, 246, 0.35), 0 10px 40px -12px rgba(139, 92, 246, 0.45);
+  --shadow-glow: 0 0 0 1px rgba(167, 139, 250, 0.35), 0 10px 40px -12px rgba(167, 139, 250, 0.45);
 
   --animate-shimmer: shimmer 1.6s ease-in-out infinite;
   --animate-scan: scan 2.2s ease-in-out infinite;
@@ -44,20 +47,22 @@
   color-scheme: dark;
 }
 
-/* Scoped light theme: overrides the same tokens the whole app already renders with,
-   so any subtree carrying this attribute (e.g. the public landing page) repaints
-   correctly with no component changes. */
+/* Scoped light theme: overrides the same tokens the whole app already renders with, so any
+   subtree carrying this attribute repaints correctly with no component changes. Set on <html> by
+   the theme system (components/theme-provider.tsx, lib/theme.ts) rather than hardcoded per page. */
 [data-theme="light"] {
   color-scheme: light;
-  --color-canvas: #ebe9e5;
-  --color-panel: #f3f1ed;
+  --color-canvas: #f8f7f5;
+  --color-panel: #f2f0ec;
   --color-card: #ffffff;
-  --color-elevated: #ffffff;
-  --color-line: #ddd9d1;
-  --color-line-soft: #e6e3dc;
-  --color-ink: #151514;
-  --color-muted: #5b5954;
-  --color-subtle: #87847d;
+  --color-elevated: #fdfcfb;
+  --color-line: #e4e1dc;
+  --color-line-soft: #ece9e4;
+  --color-ink: #171717;
+  /* #777777 as specified has a 4.2:1 contrast ratio on this background, short of the 4.5:1 WCAG
+     AA minimum for normal-size text; darkened one notch to #6b6b6b (~5:1) to clear it. */
+  --color-muted: #6b6b6b;
+  --color-subtle: #8a857e;
   --color-violet: #7c3aed;
   --color-violet-soft: #6d28d9;
   --color-cyan: #0e7490;
@@ -68,6 +73,7 @@
   --color-medium: #b45309;
   --color-low: #0369a1;
   --color-info: #57534e;
+  --shadow-glow: 0 0 0 1px rgba(124, 58, 237, 0.35), 0 10px 40px -12px rgba(124, 58, 237, 0.45);
 }
 
 * {
@@ -96,6 +102,16 @@ body {
   outline: 2px solid var(--color-cyan);
   outline-offset: 2px;
   border-radius: 6px;
+}
+
+/* Applied to <html> only for ~200ms while the user actively switches themes (see
+   components/theme-provider.tsx) — never a permanent global transition, so it can't animate the
+   very first paint or fight Motion's own transform/opacity animations. */
+.theme-transition,
+.theme-transition *,
+.theme-transition *::before,
+.theme-transition *::after {
+  transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease, fill 180ms ease, stroke 180ms ease !important;
 }
 
 /* Subtle ambient glow behind application and landing pages. */

@@ -16,26 +16,24 @@ import {
   KeyRound,
   Link2Off,
   Lock,
-  Moon,
   Network,
   Radar,
   ScanSearch,
   ServerCrash,
   ShieldCheck,
   Sparkles,
-  Sun,
   Terminal,
   UserCheck,
   X,
 } from "lucide-react";
 import { motion } from "motion/react";
 import Link from "next/link";
-import { useEffect, useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { Logo } from "@/components/brand";
 import { SeverityBadge, SeverityBar } from "@/components/status";
 import { ButtonLink } from "@/components/ui/button";
-import SculptureHero from "@/components/ui/liquid-sculpture-hero";
 import { Badge, Card } from "@/components/ui/primitives";
+import CoreHero from "@/components/landing/core-hero";
 
 function Section({ id, eyebrow, title, description, children }: { id?: string; eyebrow: string; title: ReactNode; description: ReactNode; children: ReactNode }) {
   return (
@@ -115,78 +113,12 @@ function ProductPreview() {
   );
 }
 
-const THEME_STORAGE_KEY = "fixify-landing-theme";
-
 export function LandingPage() {
-  const [theme, setTheme] = useState<"light" | "dark">("light");
-
-  useEffect(() => {
-    const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
-    if (stored === "light" || stored === "dark") setTheme(stored);
-  }, []);
-
-  const toggleTheme = () => {
-    setTheme((prev) => {
-      const next = prev === "dark" ? "light" : "dark";
-      window.localStorage.setItem(THEME_STORAGE_KEY, next);
-      return next;
-    });
-  };
-
   return (
-    <div className="ambient min-h-screen overflow-x-hidden bg-canvas text-ink" data-theme={theme}>
-      <header className="sticky top-0 z-30 border-b border-line-soft/70 bg-canvas/70 backdrop-blur-xl">
-        <div className="mx-auto flex h-16 max-w-6xl items-center gap-6 px-5">
-          <Logo />
-          <nav className="hidden items-center gap-6 text-[13.5px] text-muted md:flex" aria-label="Product">
-            <a href="#how" className="hover:text-ink">How it works</a>
-            <a href="#scanning" className="hover:text-ink">Scanning</a>
-            <a href="#ai" className="hover:text-ink">AI analysis</a>
-            <a href="#github" className="hover:text-ink">GitHub</a>
-            <a href="#security" className="hover:text-ink">Security</a>
-          </nav>
-          <div className="ml-auto flex items-center gap-2">
-            <button
-              type="button"
-              onClick={toggleTheme}
-              aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
-              className="flex h-9 w-9 items-center justify-center rounded-full border border-line text-muted transition hover:border-violet/40 hover:text-ink"
-            >
-              {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-            </button>
-            <ButtonLink href="/login" variant="ghost" size="sm">Sign in</ButtonLink>
-            <ButtonLink href="/register" size="sm">Start testing</ButtonLink>
-          </div>
-        </div>
-      </header>
+    <div className="ambient min-h-screen overflow-x-hidden bg-canvas text-ink">
+      <CoreHero />
 
       <main>
-        <SculptureHero
-          showNav={false}
-          showCredit={false}
-          theme={theme}
-          themeToggle={false}
-          loadFonts={false}
-          src="/sculpture/light.webp"
-          darkSrc="/sculpture/dark.webp"
-          mobileSrc="/sculpture/light-mobile.webp"
-          mobileDarkSrc="/sculpture/dark-mobile.webp"
-          background="#ebe9e5"
-          darkBackground="#090d1a"
-          accentColor={theme === "dark" ? "#a78bfa" : "#6d28d9"}
-          headingFont="var(--font-sans)"
-          bodyFont="var(--font-sans)"
-          height="calc(100svh - 4rem)"
-          eyebrow="AI-powered website testing"
-          headline={"Find Bugs.\nUnderstand Them.\nFix Them."}
-          headlineAccent="Understand Them."
-          body="An intelligent website testing platform that detects real-world issues, explains what went wrong, and helps your team generate human-reviewed fixes."
-          primaryCta={{ label: "Start Testing", href: "/register" }}
-          secondaryCta={{ label: "Explore Features", href: "#how" }}
-          backdropText="fixify"
-          imageAlt="Abstract sculpture of interwoven metallic filaments, standing in for the tangled bugs Fixify untangles"
-        />
-
         <section aria-label="Product preview" className="relative border-y border-line-soft/70 bg-panel/30 px-5 py-12 sm:py-16">
           <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-violet/[0.04] via-transparent to-cyan/[0.03]" aria-hidden />
           <div className="relative">

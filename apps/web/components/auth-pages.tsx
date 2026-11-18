@@ -11,6 +11,7 @@ import { authApi } from "@/lib/api";
 import { errorText } from "@/lib/hooks";
 import { loginSchema, registerSchema, resetSchema, type LoginValues, type RegisterValues, type ResetValues } from "@/lib/schemas";
 import { Logo } from "@/components/brand";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { Button, ButtonLink } from "@/components/ui/button";
 import { Alert, Card, FieldError, Input, Label, Reveal } from "@/components/ui/primitives";
 
@@ -18,6 +19,9 @@ function AuthFrame({ title, subtitle, children, footer }: { title: string; subti
   return (
     <div className="ambient relative flex min-h-screen items-center justify-center px-4 py-12">
       <div className="grid-backdrop pointer-events-none absolute inset-0" aria-hidden />
+      <div className="absolute right-4 top-4">
+        <ThemeToggle />
+      </div>
       <Reveal className="relative w-full max-w-[420px]">
         <div className="mb-8 flex justify-center">
           <Logo />

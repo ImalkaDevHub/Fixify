@@ -3,10 +3,34 @@ import { cn } from "@/lib/utils";
 
 export function LogoMark({ className }: { className?: string }) {
   return (
-    <span className={cn("relative flex h-8 w-8 items-center justify-center rounded-[10px] bg-gradient-to-br from-violet to-cyan shadow-[0_6px_20px_-6px_rgba(139,92,246,0.8)]", className)} aria-hidden>
-      <svg viewBox="0 0 24 24" className="h-[18px] w-[18px]" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M5 13l4 4L19 7" />
-        <path d="M5 7h6" opacity="0.6" />
+    <span className={cn("relative inline-flex h-8 w-8 shrink-0 drop-shadow-[0_6px_16px_rgba(124,58,237,0.45)]", className)} aria-hidden>
+      <svg viewBox="0 0 64 64" className="h-full w-full">
+        <defs>
+          <linearGradient id="fixify-mark-g" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stopColor="#a78bfa" />
+            <stop offset="1" stopColor="#6d28d9" />
+          </linearGradient>
+        </defs>
+        <ellipse
+          cx="32"
+          cy="32"
+          rx="27"
+          ry="9"
+          transform="rotate(-25 32 32)"
+          fill="none"
+          stroke="#c4b5fd"
+          strokeWidth="3"
+        />
+        <rect x="14" y="14" width="36" height="36" rx="10" fill="url(#fixify-mark-g)" />
+        <path
+          d="M23 33l6 6 12-14"
+          fill="none"
+          stroke="#fff"
+          strokeWidth="4.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <circle cx="55.5" cy="21" r="3.4" fill="#ede9fe" />
       </svg>
     </span>
   );

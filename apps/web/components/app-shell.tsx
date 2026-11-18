@@ -25,6 +25,7 @@ import { authApi, notificationApi } from "@/lib/api";
 import { errorText, useMe, useSignedOutRedirect } from "@/lib/hooks";
 import { cn, initials, safeInternalLink, timeAgo } from "@/lib/utils";
 import { Logo, LogoMark } from "@/components/brand";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { DropdownContent, DropdownItem, DropdownMenu, DropdownSeparator, DropdownTrigger } from "@/components/ui/overlays";
 import { Alert, Skeleton } from "@/components/ui/primitives";
@@ -281,6 +282,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
           <Breadcrumbs pathname={pathname} />
           <div className="ml-auto flex items-center gap-1.5">
+            <ThemeToggle />
             <NotificationsBell />
             {isLoading ? <Skeleton className="h-8 w-28" /> : <UserMenu />}
           </div>

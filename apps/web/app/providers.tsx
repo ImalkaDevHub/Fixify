@@ -4,6 +4,7 @@ import { MutationCache, QueryCache, QueryClient, QueryClientProvider } from "@ta
 import { MotionConfig } from "motion/react";
 import { useState, type ReactNode } from "react";
 import { ApiError } from "@/lib/api";
+import { ThemeProvider } from "@/components/theme-provider";
 import { ToastProvider } from "@/components/ui/toast";
 
 function shouldRetry(failureCount: number, error: unknown): boolean {
@@ -24,11 +25,13 @@ export function Providers({ children }: { children: ReactNode }) {
       }),
   );
   return (
-    <QueryClientProvider client={client}>
-      {/* "user" honours prefers-reduced-motion for every motion component. */}
-      <MotionConfig reducedMotion="user">
-        <ToastProvider>{children}</ToastProvider>
-      </MotionConfig>
-    </QueryClientProvider>
+    <ThemeProvider>
+      <QueryClientProvider client={client}>
+        {/* "user" honours prefers-reduced-motion for every motion component. */}
+        <MotionConfig reducedMotion="user">
+          <ToastProvider>{children}</ToastProvider>
+        </MotionConfig>
+      </QueryClientProvider>
+    </ThemeProvider>
   );
 }
